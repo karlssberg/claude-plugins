@@ -1,0 +1,8 @@
+{
+  "name": "example-plugin",
+  "description": "Copy this folder into plugins/ to start a new plugin",
+  "version": "0.1.0",
+  "author": {
+    "name": "karlssberg"
+  }
+}
