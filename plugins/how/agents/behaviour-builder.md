@@ -13,7 +13,7 @@ You build exactly one subject of a Behaviour model: one Behaviour (its Critical 
 2. Read the Behaviour model file for context: its `scope`, the existing Elements and Seams (reuse their ids), and the subject's current entry. Never edit the model file.
 3. Trace the subject in the code with Read, Grep, Glob and LSP (go to definition, find references, call hierarchy). Start at the Entry point Element and follow the calls the subject actually makes.
 4. Choose the lowest abstraction level (`system`, `container`, `component`, `code`) that still shows the whole subject within 12 nodes. If it needs more, go up a level rather than drop part of it.
-5. Write the fragment file under your own `$TMPDIR/how`, as your task names it: run `printenv TMPDIR` for the absolute folder (use `/tmp` when it prints nothing). Never write inside `.git`. Then call `mcp__how__refresh` with the `modelPath` from your task and that absolute `fragmentPath`. If it answers an error, fix the fragment and call it again.
+5. Write the fragment file under your own `$TMPDIR/how`, as your task names it: run `printenv TMPDIR` for the absolute folder, any trailing `/` removed (use `/tmp` when it prints nothing). Never write inside `.git`. Then call `mcp__how__refresh` with the `modelPath` from your task and that absolute `fragmentPath`. If it answers an error, fix the fragment and call it again; if it answers that no build is pending for this subject, stop and do not retry.
 
 ## Budget
 

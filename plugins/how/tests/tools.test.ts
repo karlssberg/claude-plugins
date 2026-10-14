@@ -6,6 +6,7 @@ import {
   fragmentNameFor,
   isCacheDir,
   isFragmentPathFor,
+  isFullShaModelPath,
   isModelPath,
   resolvableStack,
 } from '../hooks/drill-down'
@@ -15,6 +16,12 @@ import { codebaseSmallJson, prSmallJson } from './fixtures/models'
 import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, written } from './fixtures/world'
 
 const model = (): BehaviourModel => clone(load(prSmallJson))
+/** A full-sha staging copy and its cache file; `<git dir>/HEAD` proves the cache folder's parent is a git dir. */
+const SHA = `9be2d41c7a85${'0'.repeat(28)}`
+const STAGING = `/var/folders/x/T/how/${SHA}.json`
+const CACHE_DIR = `${CWD}/.git/how`
+const CACHE = `${CACHE_DIR}/${SHA}.json`
+const GIT_HEAD = { [`${CWD}/.git/HEAD`]: 'ref: refs/heads/main\n' }
 const filesOf = (m: BehaviourModel): Record<string, string> => ({ ...sourcesFor(m), [MODEL_PATH]: JSON.stringify(m) })
 
 describe('model paths', () => {
@@ -50,14 +57,24 @@ describe('model paths', () => {
     expect(isFragmentPathFor(`/tmp/how/${name}`, MODEL_PATH, [])).toBe(false)
     expect(isFragmentPathFor(`/tmp/how/9be2d41c7a85.seam_src_a_ts_Foo.json`, MODEL_PATH, pending)).toBe(false)
     expect(isFragmentPathFor(42, MODEL_PATH, pending)).toBe(false)
+    expect(isFragmentPathFor(`how/${name}`, MODEL_PATH, pending)).toBe(false)
   })
-  test('cacheDir must be <…/.git or …x.git>/how', () => {
+  test('cacheDir must be an absolute </…/.git or …x.git>/how with no . , .. or empty segment', () => {
     expect(isCacheDir(`${CWD}/.git/how`)).toBe(true)
     expect(isCacheDir('/srv/repo.git/how')).toBe(true)
-    for (const bad of [`${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/how/`, `${CWD}/.git/../how`, `${CWD}/git/how`, 'how', '', 42, undefined]) {
+    for (const bad of [
+      `${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/how/`, `${CWD}/.git/../how`, `${CWD}/git/how`, 'how', '', 42, undefined,
+      'work/repo/.git/how', '.git/how', `${CWD}/./.git/how`, `/work//repo/.git/how`,
+    ]) {
       expect(isCacheDir(bad)).toBe(false)
     }
-    expect(cachePathFor(`${CWD}/.git/how`, '/var/folders/x/T/how/9be2d41c7a85.json')).toBe(MODEL_PATH)
+    expect(cachePathFor(CACHE_DIR, STAGING)).toBe(CACHE)
+  })
+  test('a model staged for the cache must be named for a full 40- or 64-hex sha', () => {
+    expect(isFullShaModelPath(STAGING)).toBe(true)
+    expect(isFullShaModelPath(`/t/how/${'a'.repeat(64)}.json`)).toBe(true)
+    expect(isFullShaModelPath(MODEL_PATH)).toBe(false)
+    expect(isFullShaModelPath(`/t/how/${'a'.repeat(41)}.json`)).toBe(false)
   })
 })
 
@@ -147,31 +164,67 @@ describe('mcp__how__open', () => {
   })
 
   test('open with cacheDir reads the staging file and writes the verified model to the cache', async ($, on) => {
-    const STAGING = '/var/folders/x/T/how/9be2d41c7a85.json'
     const m = load(codebaseSmallJson) // b-refund is pending
-    const w = world(on, { files: { ...sourcesFor(m), [STAGING]: JSON.stringify(m) } })
-    const r = await callTool($, 'open', { modelPath: STAGING, cacheDir: `${CWD}/.git/how` })
+    const w = world(on, { files: { ...sourcesFor(m), ...GIT_HEAD, [STAGING]: JSON.stringify(m) } })
+    const r = await callTool($, 'open', { modelPath: STAGING, cacheDir: CACHE_DIR })
     expect(r.deny).toBeUndefined()
     expect(r.result).toMatch(/^3 Behaviours, 0 elements dropped/)
-    expect(w.writes.map(x => x.path)).toEqual([MODEL_PATH])
-    expect(written(w).version).toBe(1)
+    expect(w.writes.map(x => x.path)).toEqual([CACHE])
+    expect(written(w, CACHE).version).toBe(1)
     // The stored path is the cache: a build writes its status there and names it to the builder.
     const ui = await mountPane($)
     await ui.press({ key: 'behaviour-b-refund' })
     await ui.press({ key: 'build' })
-    expect(w.spawns[0]!.prompt).toContain(`Behaviour model at ${MODEL_PATH}.`)
-    expect(w.writes.every(x => x.path === MODEL_PATH)).toBe(true)
-    expect(written(w).behaviours.find(b => b.id === 'b-refund')!.status).toBe('building')
+    expect(w.spawns[0]!.prompt).toContain(`Behaviour model at ${CACHE}.`)
+    expect(w.writes.every(x => x.path === CACHE)).toBe(true)
+    expect(written(w, CACHE).behaviours.find(b => b.id === 'b-refund')!.status).toBe('building')
     await ui.unmount()
   })
 
-  test('a bad cacheDir is rejected without reading or writing', async ($, on) => {
-    const STAGING = '/var/folders/x/T/how/9be2d41c7a85.json'
-    const w = world(on, { files: { ...filesOf(model()), [STAGING]: JSON.stringify(model()) } })
-    for (const cacheDir of [`${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/../how`, '/tmp/how', 42]) {
+  test('after an open with cacheDir, a refresh naming the staging copy is denied and writes nothing', async ($, on) => {
+    const m = model()
+    const w = world(on, { files: { ...sourcesFor(m), ...GIT_HEAD, [STAGING]: JSON.stringify(m) } })
+    await callTool($, 'open', { modelPath: STAGING, cacheDir: CACHE_DIR })
+    const before = w.writes.length
+    const r = await callTool($, 'refresh', { modelPath: STAGING })
+    expect(r.deny).toMatch(/modelPath must be the Behaviour model the panel holds/)
+    expect(w.writes.length).toBe(before)
+    const ok = await callTool($, 'refresh', { modelPath: CACHE })
+    expect(ok.deny).toBeUndefined()
+    expect(w.writes.every(x => x.path === CACHE)).toBe(true)
+  })
+
+  test('a refresh before any open is denied', async ($, on) => {
+    const w = world(on, { files: filesOf(model()) })
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH })
+    expect(r.deny).toMatch(/modelPath must be the Behaviour model the panel holds/)
+    expect(w.reads).toEqual([])
+  })
+
+  test('reload after a failed open with cacheDir re-reads the staging file and writes the cache', async ($, on) => {
+    const w = world(on, { files: { ...sourcesFor(model()), ...GIT_HEAD, [STAGING]: '{ not json' } })
+    const r = await callTool($, 'open', { modelPath: STAGING, cacheDir: CACHE_DIR })
+    expect(r.deny).toMatch(/not valid JSON/)
+    expect(w.writes).toEqual([])
+    w.files[STAGING] = JSON.stringify(model())
+    const ui = await mountPane($)
+    await ui.press({ key: 'reload' })
+    expect(await ui.find({ key: 'behaviour-b-place' })).toBeDefined()
+    expect(w.writes.map(x => x.path)).toEqual([CACHE])
+    await ui.unmount()
+  })
+
+  test('a bad cacheDir, a cacheDir without a git HEAD, or a short sha is rejected without reading or writing', async ($, on) => {
+    const w = world(on, {
+      files: { ...filesOf(model()), [STAGING]: JSON.stringify(model()), '/srv/fake.git/how/x': '', [`/var/folders/x/T/how/9be2d41c7a85.json`]: '{}' },
+    })
+    for (const cacheDir of [`${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/../how`, '/tmp/how', 42, CACHE_DIR, '/srv/fake.git/how']) {
       const r = await callTool($, 'open', { modelPath: STAGING, cacheDir })
       expect(r.deny).toMatch(/cacheDir must/)
     }
+    w.files[`${CWD}/.git/HEAD`] = 'ref: refs/heads/main\n'
+    const short = await callTool($, 'open', { modelPath: '/var/folders/x/T/how/9be2d41c7a85.json', cacheDir: CACHE_DIR })
+    expect(short.deny).toMatch(/full 40- or 64-hex/)
     expect(w.reads).toEqual([])
     expect(w.writes).toEqual([])
     expect(w.opened).toEqual([])

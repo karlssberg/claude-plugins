@@ -96,6 +96,8 @@ describe('pure drill-down', () => {
     expect(p).toContain(MODEL_PATH)
     expect(p).toContain(`Write ONLY this fragment file, and no other file: $TMPDIR/how/${FRAGMENT_NAME}`)
     expect(p).toContain('printenv TMPDIR')
+    expect(p).toContain('no build is pending')
+    expect(p).toMatch(/stop/)
     expect(p).toContain('/p/skills/how/references/behaviour-model.md')
     expect(p).toContain(`mcp__how__refresh with ${JSON.stringify({ modelPath: MODEL_PATH, fragmentPath: `<TMPDIR>/how/${FRAGMENT_NAME}` })}`)
     expect(p).toContain('"b-refund"')
@@ -252,14 +254,14 @@ describe('lazy drill-down', () => {
     await ui.unmount()
   })
 
-  test('a fragment with the wrong sha, a subject not pending, or outside a how folder is rejected', async ($, on) => {
+  test('a fragment with the wrong sha, a relative path or outside a how folder is rejected', async ($, on) => {
     const { w, ui } = await setup($, on)
     await ui.press({ key: 'build' })
     const bad = [
       `/var/folders/b/T/how/deadbeef1.behaviour_b-refund.fragment.json`,
-      `/var/folders/b/T/how/9be2d41c7a85.behaviour_b-cancel.fragment.json`,
       `/var/folders/b/T/${FRAGMENT_NAME}`,
       `/var/folders/b/T/how/../how/${FRAGMENT_NAME}`,
+      `how/${FRAGMENT_NAME}`,
       `${CWD}/evil.fragment.json`,
     ]
     for (const fragmentPath of bad) {
@@ -272,9 +274,23 @@ describe('lazy drill-down', () => {
     await ui.unmount()
   })
 
-  test('a fragment with nothing pending is rejected', async ($, on) => {
-    world(on)
+  test('a well-formed fragment for a subject with no pending build says to stop', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    const other = `/var/folders/b/T/how/9be2d41c7a85.behaviour_b-cancel.fragment.json`
+    w.files[other] = JSON.stringify(fragment())
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: other })
+    expect(r.deny).toMatch(/no build is pending for this subject; stop, do not retry/)
+    expect(w.reads.includes(other)).toBe(false)
+    expect(statusOf(written(w))).toBe('building')
+    await ui.unmount()
+  })
+
+  test('a fragment with nothing pending says to stop', async ($, on) => {
+    const m = model()
+    world(on, { files: { ...sourcesFor(m), [MODEL_PATH]: JSON.stringify(m) } })
+    await callTool($, 'open', { modelPath: MODEL_PATH })
     const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
-    expect(r.deny).toMatch(/fragmentPath must/)
+    expect(r.deny).toMatch(/no build is pending for this subject; stop, do not retry/)
   })
 })

@@ -4,7 +4,7 @@
 declare module 'claude-code' {
   interface PluginState {
     how: {
-      model: { path?: string; model?: { [key: string]: unknown }; error?: string }
+      model: { path?: string; source?: string; model?: { [key: string]: unknown }; error?: string }
       /** Builds waiting for their refresh, by the spawned builder's agentId (hooks/drill-down.ts PendingBuild). */
       pending: {
         [agentId: string]: {

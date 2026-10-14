@@ -11,10 +11,10 @@ The model format is [references/behaviour-model.md](references/behaviour-model.m
 
 ## 1. Resolve the target
 
-Run `git rev-parse --path-format=absolute --git-common-dir`, `git rev-parse HEAD` and `printenv TMPDIR` (use `/tmp` when it prints nothing). Two paths follow, each with the full 40-hex head sha:
+Run `git rev-parse --path-format=absolute --git-common-dir`, `git rev-parse HEAD` and `printenv TMPDIR`. `<TMPDIR>` is the absolute path that printed, any trailing `/` removed, or `/tmp` when it printed nothing. Two paths follow, each with the full 40-hex head sha:
 
 - The **cache path** `<git-common-dir>/how/<head sha>.json`, with the **cache folder** `<git-common-dir>/how`. The how panel writes it. You only read it: `.git` is a protected path, so never write, `mkdir` or edit anything inside `.git`.
-- The **staging path** `<TMPDIR>/how/<head sha>.json`, the absolute path you write a new model to. Create its folder with `mkdir -p "$TMPDIR/how"`.
+- The **staging path** `<TMPDIR>/how/<head sha>.json`, the absolute path you write a new model to. Create its folder with `mkdir -p <TMPDIR>/how`, the resolved value written out, never `$TMPDIR` (empty, it would make `/how`).
 
 Read the arguments (`$ARGUMENTS`; when the skill fired from a plain-language ask, the PR, path or topic the user named):
 

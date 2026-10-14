@@ -16,7 +16,8 @@ export type Navigation = {
   showAll: boolean
 }
 
-export type ModelState = { path?: string; model?: BehaviourModel; error?: string }
+/** `path` is where the model is read and written; after a failed open with cacheDir, `source` is the staging file to re-read. */
+export type ModelState = { path?: string; source?: string; model?: BehaviourModel; error?: string }
 
 export const initialNavigation = (): Navigation => ({
   stack: [{ kind: 'map' }],

@@ -20,21 +20,30 @@ const MAX_DROPPED_LISTED = 10
 const MODEL_PATH = /\/how\/[0-9a-fA-F]{7,64}\.json$/
 export const isModelPath = (p: unknown): p is string => typeof p === 'string' && MODEL_PATH.test(p)
 
+/** A model staged for the cache is named for the full head sha, which the skill's cache check looks up. */
+const FULL_SHA_MODEL_PATH = /\/how\/(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\.json$/
+export const isFullShaModelPath = (p: unknown): p is string => typeof p === 'string' && FULL_SHA_MODEL_PATH.test(p)
+
 const segments = (p: string) => p.split('/')
+/** Absolute, and no segment is empty, `.` or `..`. */
+const isCleanAbsolute = (p: string) => p.startsWith('/') && segments(p).slice(1).every(x => x !== '' && x !== '.' && x !== '..')
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 /** The model's hex stem: `<sha>` of `<…>/how/<sha>.json`. */
 const shaOf = (modelPath: string) => baseName(modelPath).slice(0, -'.json'.length)
 
 /**
- * The cache folder `<git common dir>/how`: it ends in `/how`, sits right under a folder named `.git` or ending in
- * `.git` (a bare repository), and has no `..` segment.
+ * The cache folder `<git common dir>/how` by spelling: absolute, ends in `/how`, sits right under a folder named
+ * `.git` or ending in `.git` (a bare repository), and has no empty, `.` or `..` segment. register.tsx also checks
+ * that `<git dir>/HEAD` exists (gitDirOf).
  */
 export function isCacheDir(p: unknown): p is string {
-  if (typeof p !== 'string' || !p.endsWith('/how')) return false
+  if (typeof p !== 'string' || !p.endsWith('/how') || !isCleanAbsolute(p)) return false
   const parts = segments(p)
-  const parent = parts[parts.length - 2] ?? ''
-  return !parts.includes('..') && parent.endsWith('.git')
+  return (parts[parts.length - 2] ?? '').endsWith('.git')
 }
+
+/** The git dir a cache folder sits in: `<git dir>/how` → `<git dir>`. */
+export const gitDirOf = (cacheDir: string): string => cacheDir.slice(0, -'/how'.length)
 
 /** Where the mod caches the model: `<cacheDir>/<sha>.json`, `<sha>` the hex stem of `modelPath`. */
 export const cachePathFor = (cacheDir: string, modelPath: string): string => `${cacheDir}/${shaOf(modelPath)}.json`
@@ -49,23 +58,31 @@ const safeKey = (s: BuildSubject) => subjectKey(s).replace(/[^A-Za-z0-9_-]/g, '_
 export const fragmentNameFor = (modelPath: string, subject: BuildSubject): string =>
   `${shaOf(modelPath)}.${safeKey(subject)}.fragment.json`
 
-/** The pending subject `fragmentPath` is named for, if any (see isFragmentPathFor). */
+/**
+ * True when `fragmentPath` is shaped as a fragment of `modelPath`: absolute, no `..` segment, in a folder named
+ * `how`, named `<model sha>.<key>.fragment.json`. The folder is the builder's own (its `$TMPDIR/how`).
+ */
+export function isFragmentShapeFor(fragmentPath: unknown, modelPath: string): fragmentPath is string {
+  if (typeof fragmentPath !== 'string' || !fragmentPath.startsWith('/')) return false
+  const parts = segments(fragmentPath)
+  if (parts.includes('..') || parts[parts.length - 2] !== 'how') return false
+  const name = parts[parts.length - 1]!
+  const prefix = `${shaOf(modelPath)}.`
+  return name.startsWith(prefix) && /^[A-Za-z0-9_-]+\.fragment\.json$/.test(name.slice(prefix.length))
+}
+
+/** The pending subject a well-shaped `fragmentPath` is named for, if any: `<key>` is its sanitized subject key. */
 export function fragmentSubjectOf(
   fragmentPath: unknown,
   modelPath: string,
   pending: readonly BuildSubject[],
 ): BuildSubject | undefined {
-  if (typeof fragmentPath !== 'string') return undefined
-  const parts = segments(fragmentPath)
-  if (parts.includes('..') || parts[parts.length - 2] !== 'how') return undefined
-  const name = parts[parts.length - 1]
+  if (!isFragmentShapeFor(fragmentPath, modelPath)) return undefined
+  const name = baseName(fragmentPath)
   return pending.find(s => fragmentNameFor(modelPath, s) === name)
 }
 
-/**
- * True when `fragmentPath` is `<…>/how/<model sha>.<key>.fragment.json` with no `..` segment, `<key>` the sanitized
- * key of a pending subject. The folder is the builder's own (its `$TMPDIR/how`), so it need not be the model's.
- */
+/** isFragmentShapeFor, and `<key>` is the sanitized key of a pending subject. */
 export function isFragmentPathFor(fragmentPath: unknown, modelPath: string, pending: readonly BuildSubject[]): fragmentPath is string {
   return fragmentSubjectOf(fragmentPath, modelPath, pending) !== undefined
 }
@@ -284,12 +301,13 @@ export function builderPrompt(p: BuilderPromptInput): string {
     `Read the Behaviour model for context (its scope, Elements, Seams and the subject's current entry); never edit it.`,
     '',
     `Write ONLY this fragment file, and no other file: ${fragment}`,
-    '`$TMPDIR` is your own temp folder, never inside .git: run `printenv TMPDIR` for its absolute path <TMPDIR> (use /tmp when it prints nothing) and write <TMPDIR>/how/' +
+    '`$TMPDIR` is your own temp folder, never inside .git: run `printenv TMPDIR` for its absolute path <TMPDIR>, any trailing / removed (use /tmp when it prints nothing) and write <TMPDIR>/how/' +
       `${p.fragmentName} (Write creates the how folder).`,
     'It is one JSON object { "behaviour"?, "seamView"?, "elements"?, "seams"? } holding:',
     `- ${shape};`,
     '- "elements" and "seams": only the NEW Elements and Seams it references (ids already in the model are kept as they are).',
     '',
-    `Then call mcp__how__refresh with ${refresh}, <TMPDIR> replaced by that absolute path. If it returns an error, fix the fragment and call it again.`,
+    `Then call mcp__how__refresh with ${refresh}, <TMPDIR> replaced by that absolute path. If it returns an error, fix the fragment and call it again,`,
+    'except when it answers that no build is pending for this subject: then stop, and do not retry.',
   ].join('\n')
 }
