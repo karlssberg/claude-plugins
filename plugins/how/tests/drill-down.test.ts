@@ -206,12 +206,12 @@ describe('lazy drill-down', () => {
     const cancel = clone(model().behaviours.find(b => b.id === 'b-cancel')!)
     w.files[FRAGMENT] = JSON.stringify({ behaviour: cancel })
     const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
-    expect(r.deny).toMatch(/fragment builds behaviour:b-cancel but .* is for behaviour:b-refund/)
+    expect(r.deny).toMatch(/fragment builds behaviour:b-cancel but .* is for behaviour:b-refund.*the build failed; stop, do not retry/)
     expect(statusOf(written(w))).toBe('failed')
     await ui.unmount()
   })
 
-  test('a failed merge marks the subject failed and returns the error', async ($, on) => {
+  test('an invalid fragment keeps the build pending and building, and returns the error to fix', async ($, on) => {
     const { w, ui } = await setup($, on)
     await ui.press({ key: 'build' })
     const f = fragment()
@@ -219,8 +219,54 @@ describe('lazy drill-down', () => {
     w.files[FRAGMENT] = JSON.stringify(f)
     const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
     expect(r.deny).toMatch(/names no Element/)
+    expect(r.deny).toMatch(/fix the fragment and call mcp__how__refresh again \(2 resubmits left\)/)
+    expect(statusOf(written(w))).toBe('building')
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    w.files[FRAGMENT] = '{'
+    const r2 = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r2.deny).toMatch(/not valid JSON.*\(1 resubmit left\)/)
+    expect(statusOf(written(w))).toBe('building')
+    await ui.unmount()
+  })
+
+  test('a resubmit after a validation error merges', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    const f = fragment()
+    delete (f as any).elements
+    w.files[FRAGMENT] = JSON.stringify(f)
+    expect((await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })).deny).toBeDefined()
+    w.files[FRAGMENT] = JSON.stringify(fragment())
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toBeUndefined()
+    expect(String(r.result)).toContain(`(merged ${FRAGMENT})`)
+    expect(statusOf(written(w))).toBe('built')
+    await ui.unmount()
+  })
+
+  test('a third validation failure marks the subject failed and says to stop', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    w.files[FRAGMENT] = '{'
+    for (let i = 0; i < 2; i++) {
+      await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+      expect(statusOf(written(w))).toBe('building')
+    }
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toMatch(/not valid JSON.*the build failed; stop, do not retry/)
     expect(statusOf(written(w))).toBe('failed')
     expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeDefined()
+    // The pending entry is gone: a further refresh says no build is pending.
+    expect((await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })).deny).toMatch(/no build is pending/)
+    await ui.unmount()
+  })
+
+  test('an unreadable fragment fails the build at once', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toMatch(/Could not read the fragment.*the build failed; stop, do not retry/)
+    expect(statusOf(written(w))).toBe('failed')
     await ui.unmount()
   })
 

@@ -8,6 +8,7 @@ import { type BehaviourModel, type BuildStatus, parseBehaviourModel } from './mo
 import { verifyEvidence } from './model/evidence-check'
 import {
   applyStepDiffs,
+  BUILD_FAILED,
   BUILD_TIMEOUT_MS,
   BUILDER_AGENT,
   type BuildSubject,
@@ -23,8 +24,10 @@ import {
   isFragmentShapeFor,
   isFullShaModelPath,
   isModelPath,
+  MAX_RESUBMITS,
   mergeFragment,
   type PendingBuild,
+  rejectedFragment,
   type PendingBuilds,
   resolvableStack,
   settleOrphanBuilds,
@@ -101,8 +104,8 @@ const BAD_CACHE_DIR =
 const SHORT_SHA = 'with cacheDir, modelPath must be named for the full 40- or 64-hex head sha: <folder>/how/<head sha>.json'
 const NOT_HELD = (path: string | undefined) =>
   path === undefined
-    ? 'modelPath must be the Behaviour model the panel holds, and it holds none: call mcp__how__open first'
-    : `modelPath must be the Behaviour model the panel holds: ${path}`
+    ? 'modelPath must be the Behaviour model the panel holds, and it holds none (mcp__how__open loads one); stop, do not retry'
+    : `modelPath must be the Behaviour model the panel holds: ${path}; stop, do not retry`
 const BAD_FRAGMENT_PATH = 'fragmentPath must be an absolute <folder>/how/<model sha>.<subject>.fragment.json, with no ..'
 const NO_PENDING = 'no build is pending for this subject; stop, do not retry'
 
@@ -233,7 +236,22 @@ async function failPending($: any, agentId: string): Promise<void> {
   })
 }
 
-/** `mcp__how__refresh` with a fragment: merge it into the file model, verify, write; a bad merge fails the subject. */
+/** Counts a rejected fragment against the subject's pending build; answers how many it has had before this one. */
+async function noteRejected($: any, key: string): Promise<number> {
+  const pending = await read($, pendingState)
+  const ids = Object.keys(pending).filter(id => subjectKey(pending[id]!.subject) === key)
+  const before = Math.max(0, ...ids.map(id => pending[id]!.rejected ?? 0))
+  await update($, pendingState, (p: PendingBuilds) =>
+    Object.fromEntries(Object.entries(p).map(([id, b]) => [id, ids.includes(id) ? { ...b, rejected: before + 1 } : b])),
+  )
+  return before
+}
+
+/**
+ * `mcp__how__refresh` with a fragment: merge it into the file model, verify, write. A fragment that fails to parse
+ * or validate keeps the build pending for a fixed resubmit (MAX_RESUBMITS); one that cannot be read or builds
+ * another subject fails it.
+ */
 async function mergeBuild($: any, modelPath: string, fragmentPath: string, pending: PendingBuild): Promise<ToolAnswer> {
   const out = await serial(async (): Promise<ToolAnswer> => {
     let modelText: string
@@ -250,19 +268,25 @@ async function mergeBuild($: any, modelPath: string, fragmentPath: string, pendi
     } catch (err) {
       await clearPending($, subjectKey(pending.subject))
       await writeStatus($, pending.subject, 'failed')
-      return { deny: `Could not read the fragment at ${fragmentPath}: ${errText(err)}` }
+      return { deny: `Could not read the fragment at ${fragmentPath}: ${errText(err)}; ${BUILD_FAILED}` }
     }
     const merged = mergeFragment(parsed.model, fragmentText)
     const subject = pending.subject
-    await clearPending($, subjectKey(subject))
-    if (merged.subject && subjectKey(merged.subject) !== subjectKey(pending.subject)) {
-      await writeStatus($, pending.subject, 'failed')
-      return { deny: `fragment builds ${subjectKey(merged.subject)} but ${fragmentPath} is for ${subjectKey(pending.subject)}` }
+    const key = subjectKey(subject)
+    if (merged.subject && subjectKey(merged.subject) !== key) {
+      await clearPending($, key)
+      await writeStatus($, subject, 'failed')
+      return { deny: `fragment builds ${subjectKey(merged.subject)} but ${fragmentPath} is for ${key}; ${BUILD_FAILED}` }
     }
     if ('error' in merged) {
-      await writeStatus($, subject, 'failed')
-      return { deny: merged.error }
+      const answer = rejectedFragment(merged.error, await noteRejected($, key))
+      if (!answer.retry) {
+        await clearPending($, key)
+        await writeStatus($, subject, 'failed')
+      }
+      return { deny: answer.text }
     }
+    await clearPending($, key)
     const verified = await commit($, modelPath, merged.model)
     // $.fs has no delete: the fragment stays in the builder's $TMPDIR/how (the next build of the subject overwrites it).
     return { result: `${formatLoadResult(verified.model, verified.dropped)} (merged ${fragmentPath})` }
@@ -373,7 +397,7 @@ export const register: Register = on => {
             'Reload the Behaviour model in the `how` panel (modelPath must be the one it holds), keeping its navigation. With fragmentPath (a ' +
             '`$TMPDIR/how/<model sha>.<subject>.fragment.json` written by how:behaviour-builder), merge that ' +
             'built Behaviour or Seam view into the model, mark it built and re-verify Evidence; an invalid fragment ' +
-            'marks the build failed and answers why.',
+            `answers why and may be fixed and resubmitted ${MAX_RESUBMITS} times before the build fails.`,
           inputSchema: {
             type: 'object',
             properties: {

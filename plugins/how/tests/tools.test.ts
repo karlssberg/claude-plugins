@@ -188,6 +188,7 @@ describe('mcp__how__open', () => {
     const before = w.writes.length
     const r = await callTool($, 'refresh', { modelPath: STAGING })
     expect(r.deny).toMatch(/modelPath must be the Behaviour model the panel holds/)
+    expect(r.deny).toMatch(/stop, do not retry/)
     expect(w.writes.length).toBe(before)
     const ok = await callTool($, 'refresh', { modelPath: CACHE })
     expect(ok.deny).toBeUndefined()
@@ -198,6 +199,7 @@ describe('mcp__how__open', () => {
     const w = world(on, { files: filesOf(model()) })
     const r = await callTool($, 'refresh', { modelPath: MODEL_PATH })
     expect(r.deny).toMatch(/modelPath must be the Behaviour model the panel holds/)
+    expect(r.deny).toMatch(/stop, do not retry/)
     expect(w.reads).toEqual([])
   })
 

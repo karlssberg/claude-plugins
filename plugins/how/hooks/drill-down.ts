@@ -8,13 +8,31 @@ import { resolveEvidenceOwner } from './panel/evidence-owner'
 import type { Navigation, ViewRef } from './panel/navigation'
 
 export type BuildSubject = Extract<ViewRef, { kind: 'behaviour' | 'seam' }>
-/** A spawned `how:behaviour-builder` waiting for its refresh, keyed by agentId in the `pending` atom. */
-export type PendingBuild = { subject: BuildSubject; modelPath: string; fragmentName: string }
+/**
+ * A spawned `how:behaviour-builder` waiting for its refresh, keyed by agentId in the `pending` atom. `rejected`
+ * counts the fragments it submitted that failed to parse or validate.
+ */
+export type PendingBuild = { subject: BuildSubject; modelPath: string; fragmentName: string; rejected?: number }
 export type PendingBuilds = Record<string, PendingBuild>
 
 export const BUILDER_AGENT = 'how:behaviour-builder'
 export const BUILD_TIMEOUT_MS = 10 * 60 * 1000
 const MAX_DROPPED_LISTED = 10
+/** Fragments a builder may resubmit after one fails to parse or validate; the next failure fails the build. */
+export const MAX_RESUBMITS = 2
+/** Appended to a refusal that ended the build. */
+export const BUILD_FAILED = 'the build failed; stop, do not retry'
+
+/**
+ * The answer to a fragment that failed to parse or validate, its build having had `rejected` such failures before:
+ * fix and resubmit while resubmits are left (`retry`), otherwise the build failed.
+ */
+export function rejectedFragment(error: string, rejected: number): { retry: boolean; text: string } {
+  const left = MAX_RESUBMITS - rejected
+  if (left <= 0) return { retry: false, text: `${error}; ${BUILD_FAILED}` }
+  const n = `${left} resubmit${left === 1 ? '' : 's'} left`
+  return { retry: true, text: `${error}; fix the fragment and call mcp__how__refresh again (${n})` }
+}
 
 /** A Behaviour model file: `<…>/how/<head sha>.json`, the cache in `.git` or the producer's `$TMPDIR` staging copy. */
 const MODEL_PATH = /\/how\/[0-9a-fA-F]{7,64}\.json$/
@@ -307,7 +325,8 @@ export function builderPrompt(p: BuilderPromptInput): string {
     `- ${shape};`,
     '- "elements" and "seams": only the NEW Elements and Seams it references (ids already in the model are kept as they are).',
     '',
-    `Then call mcp__how__refresh with ${refresh}, <TMPDIR> replaced by that absolute path. If it returns an error, fix the fragment and call it again,`,
-    'except when it answers that no build is pending for this subject: then stop, and do not retry.',
+    `Then call mcp__how__refresh with ${refresh}, <TMPDIR> replaced by that absolute path. If it returns an error that says to fix the fragment,`,
+    `fix it and call it again (at most ${MAX_RESUBMITS} times). When it answers "stop, do not retry" (the build failed, no build is pending, or`,
+    'the panel holds another model), stop and do not retry.',
   ].join('\n')
 }
