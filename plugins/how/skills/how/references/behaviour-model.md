@@ -42,7 +42,7 @@ type BehaviourModel = {
 - `level`: C4-style abstraction level.
 - `parentId`: id of the containing Element, which must exist.
 - `external`: true for systems outside the repo (clients, third-party services).
-- `evidence`: where the Element is defined (empty only for external Elements).
+- `evidence`: where the Element is defined. An external Element cites the code in the repo that receives or calls it (a route registration, a client call site). An Element without Evidence is dropped.
 
 ### Step
 - `id`: unique within its Behaviour.
@@ -96,5 +96,6 @@ type BehaviourModel = {
 - `intent`: `text` of the stated intent, `sources` it came from, `isMissing` when none was found.
 - `intentMismatches`: each Intent mismatch with the `claim`, what was `observed`, and Evidence.
 - `behaviours`, `elements`, `seams`, `seamViews`: as above; `seamViews` is keyed by Element id or Seam id.
+- `elements`: in PR mode, the union of the head and base Elements, so the Steps of `baseBehaviours` resolve.
 - `incidentalChanges`: Incidental changes with `file`, `hunk` and a `reason`.
 - `baseBehaviours`: PR mode only; the same Behaviours as at base, matched by entry point Element name, used for the diff.
