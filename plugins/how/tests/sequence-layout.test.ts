@@ -45,7 +45,7 @@ describe('layoutBehaviourView', () => {
 
   test('250-char label is truncated with …', () => {
     const m = load()
-    const b = structuredClone(m.behaviours[0]!)
+    const b = JSON.parse(JSON.stringify((m.behaviours[0]!))) as typeof m.behaviours[0]
     b.steps[0]!.label = 'x'.repeat(250)
     const l = layoutBehaviourView(b, m, opts)
     const label = l.edges[0]!.label
@@ -80,7 +80,7 @@ describe('layoutBehaviourView', () => {
 
   test('elements outside the Behaviour elementIds that its Steps touch are drawn isFaded', () => {
     const m = load()
-    const b = { ...structuredClone(m.behaviours[0]!), elementIds: ['client', 'orders-api', 'order-service', 'inventory', 'payments', 'error-mw'] }
+    const b = { ...JSON.parse(JSON.stringify((m.behaviours[0]!))) as typeof m.behaviours[0], elementIds: ['client', 'orders-api', 'order-service', 'inventory', 'payments', 'error-mw'] }
     const l = layoutBehaviourView(b, m, opts)
     const repo = l.nodes.find(n => n.id === 'order-repo')!
     expect(repo.style.isFaded).toBe(true)

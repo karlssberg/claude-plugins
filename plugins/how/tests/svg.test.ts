@@ -28,7 +28,7 @@ function wellFormed(svg: string) {
 describe('toSvg', () => {
   test('labels with < & " and emoji produce well-formed svg', () => {
     const m = load()
-    const b = structuredClone(m.behaviours[0]!)
+    const b = JSON.parse(JSON.stringify((m.behaviours[0]!))) as typeof m.behaviours[0]
     b.steps[0]!.label = `🚀<b & "c" 'd'>`
     const els = { ...m.elements, 'orders-api': { ...m.elements['orders-api']!, name: 'A&B <x>' } }
     const svg = toSvg(layoutBehaviourView(b, { ...m, elements: els }, { maxCols: 120, showErrors: true }), CELL_PX)
@@ -41,7 +41,7 @@ describe('toSvg', () => {
 
   test('is safe: no script, handlers or external references; has dark mode and data-ids', () => {
     const m = load()
-    const b = structuredClone(m.behaviours[0]!)
+    const b = JSON.parse(JSON.stringify((m.behaviours[0]!))) as typeof m.behaviours[0]
     b.errorFlows[0]!.isSwallowed = true
     const svg = toSvg(layoutBehaviourView(b, m, { maxCols: 120, showErrors: true }), CELL_PX)
     expect(/<script/i.test(svg)).toBe(false)
