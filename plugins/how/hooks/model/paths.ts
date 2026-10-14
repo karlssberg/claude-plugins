@@ -28,3 +28,9 @@ export function containedPath(file: string, cwd: string | undefined): string | u
   const n = normalise(rel)
   return n === undefined || n === '' ? undefined : n
 }
+
+/** True when the absolute `path` is `root` itself or lies inside it (both as `realPath` spells them). */
+export function isUnder(path: string, root: string): boolean {
+  const r = root.endsWith('/') ? root.slice(0, -1) : root
+  return path === r || path.startsWith(`${r}/`)
+}

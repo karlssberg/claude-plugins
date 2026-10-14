@@ -1,0 +1,202 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+import { BUILD_TIMEOUT_MS, builderPrompt, fragmentPathFor, mergeFragment, withBuildStatus } from '../hooks/drill-down'
+import type { BehaviourModel } from '../hooks/model/behaviour-model'
+import { codebaseSmallJson } from './fixtures/models'
+import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, written } from './fixtures/world'
+
+const REFUND = { kind: 'behaviour' as const, behaviourId: 'b-refund' }
+const FRAGMENT = fragmentPathFor(MODEL_PATH, REFUND)
+
+/** codebaseSmall (b-refund pending) with the external Client cited, so a clean load drops nothing. */
+function model(): BehaviourModel {
+  const m = clone(load(codebaseSmallJson))
+  m.elements.client!.evidence = [{ file: 'src/client.ts', startLine: 1, endLine: 2, symbol: 'Client', status: 'unchecked' }]
+  return m
+}
+const ev = (symbol: string) => [{ file: 'src/payments/Refunds.ts', startLine: 3, endLine: 4, symbol, status: 'unchecked' as const }]
+
+/** A built b-refund: PaymentGateway calls a new RefundService. */
+function fragment(): Record<string, unknown> {
+  const b = clone(model().behaviours.find(x => x.id === 'b-refund')!)
+  return {
+    behaviour: {
+      ...b,
+      status: 'pending',
+      elementIds: ['payments', 'refunds'],
+      steps: [{ id: 'r1', order: 1, from: 'payments', to: 'refunds', label: 'refund(order)', kind: 'call', diff: 'unchanged', evidence: ev('refund') }],
+    },
+    elements: {
+      refunds: { id: 'refunds', name: 'RefundService', level: 'component', evidence: ev('RefundService') },
+      payments: { id: 'payments', name: 'OVERWRITTEN', level: 'component', evidence: ev('x') },
+    },
+  }
+}
+
+async function setup($: any, on: any, spawnAnswers?: ({ agentId: string } | { deny: string })[]) {
+  const clock = mock.clock(on)
+  const m = model()
+  const w = world(on, {
+    files: { ...sourcesFor(m), ...sourcesFor(fragment()), [MODEL_PATH]: JSON.stringify(m) },
+    ...(spawnAnswers ? { spawnAnswers } : {}),
+  })
+  await callTool($, 'open', { modelPath: MODEL_PATH })
+  const ui = await mountPane($)
+  await ui.press({ key: 'behaviour-b-refund' })
+  return { w, ui, clock }
+}
+const statusOf = (m: BehaviourModel, id = 'b-refund') => m.behaviours.find(b => b.id === id)!.status
+const turnEnd = ($: any, agentId: string) =>
+  $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', agentId, reason: 'answer' })
+
+describe('pure drill-down', () => {
+  test('mergeFragment replaces the Behaviour as built and never overwrites existing ids', () => {
+    const r = mergeFragment(model(), JSON.stringify(fragment()))
+    if ('error' in r) throw new Error(r.error)
+    expect(r.subject).toEqual(REFUND)
+    expect(statusOf(r.model)).toBe('built')
+    expect(r.model.behaviours.find(b => b.id === 'b-refund')!.steps).toHaveLength(1)
+    expect(r.model.elements.refunds!.name).toBe('RefundService')
+    expect(r.model.elements.payments!.name).toBe('PaymentGateway')
+  })
+  test('mergeFragment sets a Seam view as built', () => {
+    const view = { subjectId: 'payments', status: 'pending', nodes: [{ id: 'n1', label: 'x', kind: 'step', diff: 'unchanged', evidence: ev('x') }], edges: [] }
+    const r = mergeFragment(model(), JSON.stringify({ seamView: view }))
+    if ('error' in r) throw new Error(r.error)
+    expect(r.subject).toEqual({ kind: 'seam', subjectId: 'payments', behaviourId: '' })
+    expect(r.model.seamViews.payments!.status).toBe('built')
+  })
+  test('mergeFragment errors: bad JSON, unknown Behaviour, invalid result', () => {
+    expect(mergeFragment(model(), '{')).toEqual({ error: expect.stringContaining('not valid JSON') })
+    expect(mergeFragment(model(), '{}')).toEqual({ error: expect.stringContaining('neither') })
+    const unknown = { behaviour: { ...(fragment().behaviour as object), id: 'nope' } }
+    expect(mergeFragment(model(), JSON.stringify(unknown))).toEqual({
+      error: expect.stringContaining('names no Behaviour'),
+      subject: { kind: 'behaviour', behaviourId: 'nope' },
+    })
+    const f = fragment()
+    delete (f as any).elements
+    const r = mergeFragment(model(), JSON.stringify(f))
+    expect(r).toEqual({ error: expect.stringContaining('names no Element'), subject: REFUND })
+  })
+  test('withBuildStatus adds a missing Seam view', () => {
+    const m = withBuildStatus(model(), { kind: 'seam', subjectId: 'payments', behaviourId: 'b-refund' }, 'building')
+    expect(m.seamViews.payments).toEqual({ subjectId: 'payments', status: 'building', nodes: [], edges: [] })
+  })
+  test('builderPrompt says what to build, where to write, and to refresh', () => {
+    const p = builderPrompt({ modelPath: MODEL_PATH, subject: REFUND, name: 'Refund an order', fragmentPath: FRAGMENT, referencePath: '/p/skills/how/references/behaviour-model.md' })
+    expect(p).toContain(MODEL_PATH)
+    expect(p).toContain(`Write ONLY this fragment file, and no other file: ${FRAGMENT}`)
+    expect(p).toContain('/p/skills/how/references/behaviour-model.md')
+    expect(p).toContain(`mcp__how__refresh with ${JSON.stringify({ modelPath: MODEL_PATH, fragmentPath: FRAGMENT })}`)
+    expect(p).toContain('"b-refund"')
+  })
+})
+
+describe('lazy drill-down', () => {
+  test('pressing a pending behaviour spawns how:behaviour-builder once and shows Building…', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    expect(w.spawns).toHaveLength(0)
+    await ui.press({ key: 'build' })
+    expect(w.spawns).toHaveLength(1)
+    const s = w.spawns[0]!
+    expect(s.subagentType).toBe('how:behaviour-builder')
+    expect(s.description).toBe('how: build Refund an order')
+    expect(s.prompt).toContain(MODEL_PATH)
+    expect(s.prompt).toContain(FRAGMENT)
+    expect(s.prompt).toMatch(/\/skills\/how\/references\/behaviour-model\.md/)
+    expect(s.prompt).toContain('mcp__how__refresh')
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    expect(await ui.find({ key: 'build' })).toBeUndefined()
+    expect(statusOf(written(w))).toBe('building')
+    await ui.unmount()
+  })
+
+  test('deny marks failed and retry spawns again', async ($, on) => {
+    const { w, ui } = await setup($, on, [{ deny: 'not now' }, { agentId: 'agent-2' }])
+    await ui.press({ key: 'build' })
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeDefined()
+    expect(statusOf(written(w))).toBe('failed')
+    await ui.press({ key: 'retry' })
+    expect(w.spawns).toHaveLength(2)
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('turn.complete without refresh marks failed', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    await turnEnd($, 'someone-else')
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    await turnEnd($, 'agent-1')
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeDefined()
+    expect(statusOf(written(w))).toBe('failed')
+    await ui.unmount()
+  })
+
+  test('a timeout with no refresh marks failed', async ($, on) => {
+    const { ui, clock } = await setup($, on)
+    await ui.press({ key: 'build' })
+    await clock.advance(BUILD_TIMEOUT_MS - 1)
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    await clock.advance(1)
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('refresh after build flips status to built', async ($, on) => {
+    const { w, ui, clock } = await setup($, on)
+    await ui.press({ key: 'build' })
+    w.files[FRAGMENT] = JSON.stringify(fragment())
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toBeUndefined()
+    expect(String(r.result)).toMatch(/^3 Behaviours, 0 elements dropped/)
+    const saved = written(w)
+    expect(statusOf(saved)).toBe('built')
+    expect(saved.elements.refunds!.evidence[0]!.status).toBe('verified')
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeUndefined()
+    expect(await ui.find({ key: 'build' })).toBeUndefined()
+    // The pending entry is gone: neither the agent's end nor the timeout marks it failed.
+    await turnEnd($, 'agent-1')
+    await clock.advance(BUILD_TIMEOUT_MS)
+    expect(statusOf(written(w))).toBe('built')
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a failed merge marks the subject failed and returns the error', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    const f = fragment()
+    delete (f as any).elements
+    w.files[FRAGMENT] = JSON.stringify(f)
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toMatch(/names no Element/)
+    expect(statusOf(written(w))).toBe('failed')
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a model left building with no pending builder opens as failed, so it can be retried', async ($, on) => {
+    mock.clock(on)
+    const m = model()
+    m.behaviours.find(b => b.id === 'b-refund')!.status = 'building'
+    const w = world(on, { files: { ...sourcesFor(m), [MODEL_PATH]: JSON.stringify(m) } })
+    await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(statusOf(written(w))).toBe('failed')
+    const ui = await mountPane($)
+    await ui.press({ key: 'behaviour-b-refund' })
+    await ui.press({ key: 'retry' })
+    expect(w.spawns).toHaveLength(1)
+    // A refresh while the builder runs keeps it building.
+    await callTool($, 'refresh', { modelPath: MODEL_PATH })
+    expect(statusOf(written(w))).toBe('building')
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a fragment path not beside the model is rejected', async ($, on) => {
+    world(on)
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: `${CWD}/evil.fragment.json` })
+    expect(r.deny).toMatch(/fragmentPath must/)
+  })
+})
