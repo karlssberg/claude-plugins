@@ -1,6 +1,6 @@
 # how evals
 
-Two small fixture repos, each with a PR patch. The producer (`/how`) runs on each one, and its Behaviour model is scored against `expected.json`.
+Evals for the `how` plugin (`plugins/how`). They live at the repo root, outside the shipped plugin. Two small fixture repos, each with a PR patch. The producer (`/how`) runs on each one, and its Behaviour model is scored against `expected.json`.
 
 | Fixture | Code | Entry points | Seam (two implementations) | Swallowed error | PR (`pr.patch`) |
 |---|---|---|---|---|---|
@@ -11,18 +11,22 @@ Each fixture keeps its base code in `repo/`, the change in `pr.patch`, the commi
 
 ## How to run
 
-From `plugins/how`:
+From the repo root:
 
 ```sh
 node --test evals/                      # unit checks for the scorer
 evals/run-fixture.sh http-orders 1      # copy to $TMPDIR/how-eval-http-orders-1, git init, commit base, apply pr.patch, commit pr, run /how
 evals/open-fixture.sh http-orders 1     # only when the run could not call mcp__how__open itself (see Gaps)
-node evals/score.mjs evals/results/http-orders.model.json evals/fixtures/http-orders/expected.json
+node evals/score.mjs evals/results/http-orders.run1.model.json evals/fixtures/http-orders/expected.json
 ```
 
 - `run-fixture.sh` never creates a `.git` inside this repo.
-- The producer runs as `claude -p "/how HEAD~1..HEAD" --plugin-dir <plugins/how> --max-budget-usd 5 --output-format json --permission-mode bypassPermissions`. Headless runs cannot answer permission prompts. Each run is confined to the throwaway repo by the caller's sandbox.
-- The model lands at `$(git rev-parse --git-common-dir)/how/<head sha>.json` in the temp repo. It is copied to `results/<name>.model.json`, and the CLI's JSON output to `results/<name>.out.json`.
+- The producer runs as `claude -p "/how HEAD~1..HEAD" --plugin-dir plugins/how --max-budget-usd 5 --output-format json --permission-mode dontAsk --allowedTools …`.
+  - Headless runs cannot answer permission prompts, so the allowlist names what the skill and its builders use: Skill, Read, Grep, Glob, LSP, Write, Agent, `mcp__how__*`, and `Bash` limited to git (`log`, `show`, `diff`, `blame`, `rev-parse`, `merge-base`, `worktree`, `status`, `symbolic-ref`, `-C`), `mkdir -p` and `pwd`.
+  - `dontAsk` denies anything else instead of waiting for an answer. The skill's `(cd "$W" && pwd -P)` compound may be denied; `git -C "$W" rev-parse --show-toplevel` gives the same path within the list.
+  - **This allowlist has not been run live** (ruling R31). The three runs below used `--permission-mode bypassPermissions` inside a sandbox, and `open-fixture.sh` used `--allowedTools mcp__how__open`.
+- The model lands at `$(git rev-parse --git-common-dir)/how/<head sha>.json` in the temp repo. It is copied to `results/<name>.run<n>.model.json`, and the CLI's JSON output to `results/<name>.run<n>.out.json`, so a rerun never overwrites an earlier one.
+- When no model was written, the script prints the CLI's JSON answer and exits 1.
 - `score.mjs` prints `{ behaviourRecall, evidenceVerifiedRate, seamRecall, incidentalAccuracy, maxNodesPerView, contractChangedRecall, swallowedRecall, pass }` and exits 1 when `pass` is false.
 
 ## Thresholds
@@ -54,7 +58,7 @@ Cost is the `total_cost_usd` in each run's JSON output, plus the separate open c
 - `*.out.json`: the CLI result.
 - `*.open.out.json`: the open call.
 - `*.model.json`: the model after the Evidence check.
-- `http-orders.run1.*`: the failed first run.
+- `http-orders.run1.*` is the failed first run.
 
 `mcp__how__open` answered `2 Behaviours, 0 elements dropped` on all three models. It reported no parse error, no dropped Element and no path rejection.
 
@@ -76,7 +80,8 @@ Whether the builders used LSP or fell back to Grep/Read is not recorded. The ses
 
 ## Gaps
 
-- **The producer could not open its own model in these runs.** Plugin tools are served on a local port. The sandbox around these runs forbids binding one, so `$.tool.register` failed with "Failed to start server. Is port 0 in use?" and `mcp__how__open` never existed in the producer's session. `register.tsx` swallows that error silently, and the skill reported "panel could not be opened".
+- **`/how` → `mcp__how__open` in one session needs `sandbox.network.allowLocalBinding: true`** (ruling R32). `$.tool.register` binds a local port to serve the plugin's tools. These evals proved the chain across two processes instead: the producer, then `open-fixture.sh`.
+- **The producer could not open its own model in these runs.** Plugin tools are served on a local port. The sandbox around these runs forbids binding one, so `$.tool.register` failed with "Failed to start server. Is port 0 in use?" and `mcp__how__open` never existed in the producer's session. `register.tsx` swallowed that error silently at the time, and the skill reported "panel could not be opened". It now logs the reason and raises the toast "how: tools unavailable — <reason>". The skill also tells the user the likely cause and where the model was written.
   - `open-fixture.sh` then called `mcp__how__open` on the written model from a separate headless session. That session ran outside the sandbox and was allowed no tool but `mcp__how__open`, from the same temp repo, so the Evidence check read the same files.
   - The whole chain (`/how`, then the written model, then `mcp__how__open`) therefore ran across two processes, not one. Running the producer itself outside the sandbox was refused by the permission classifier.
 - **`swallowedRecall` is 0 on py-cli, but the swallowed flow is in the model.** Its origin Step is labelled "PUT the exported file to the sync server", cites `urlopen`, and has `isSwallowed: true`. It does not name `push`, the function that wraps that call, so the name match misses it.
