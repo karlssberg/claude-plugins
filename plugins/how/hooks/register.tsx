@@ -49,8 +49,10 @@ const asStored = (s: ModelState) => s as { path?: string; model?: { [key: string
  */
 export async function openEvidence($: any, ownerId: string, index: number): Promise<void> {
   const { model } = await readModel($)
-  const item = model && resolveEvidenceOwner(model, ownerId)?.evidence[index]
-  if (item) {
+  const owner = model && resolveEvidenceOwner(model, ownerId)
+  const item = owner?.evidence[index]
+  // Removed code cites base lines: the head file is never read for it (the view shows its hunk instead).
+  if (item && !owner?.removed) {
     const key = snippetKey(item)
     let value: Snippets[string]
     let cwd: string | undefined
@@ -138,12 +140,16 @@ async function openPane($: any): Promise<void> {
   }
 }
 
-/** Diff against base, verify Evidence, then write the file (pretty JSON) and the atom. Call inside `serial`. */
+/**
+ * Verify head Evidence, then diff against base (so removed Steps keep their base Evidence), then write the file
+ * (pretty JSON) and the atom. Call inside `serial`.
+ */
 async function commit($: any, modelPath: string, model: BehaviourModel) {
-  const verified = await verifyEvidence(applyStepDiffs(model), await evidenceReader($))
-  await $.fs.write(modelPath, pretty(verified.model))
-  await update($, modelState, () => asStored({ path: modelPath, model: verified.model }))
-  return verified
+  const verified = await verifyEvidence(model, await evidenceReader($))
+  const diffed = applyStepDiffs(verified.model)
+  await $.fs.write(modelPath, pretty(diffed))
+  await update($, modelState, () => asStored({ path: modelPath, model: diffed }))
+  return { model: diffed, dropped: verified.dropped }
 }
 
 async function failLoad($: any, modelPath: string, error: string): Promise<ToolAnswer> {

@@ -37,6 +37,8 @@ function model(): BehaviourModel {
 }
 
 type Seed = { model: BehaviourModel; nav: object | null; snippets: object | null; files: Record<string, string>; cwd: string | undefined }
+/** Every fs.read path the mounted pane asked for. */
+const reads: string[] = []
 const seed: Seed = { model: model(), nav: null, snippets: null, files: {}, cwd: '/work/repo' }
 
 /** Answers the reads of `how/model` (Task 10 writes it), optionally seeds nav/snippets, fs.read and session.cwd. */
@@ -51,6 +53,7 @@ async function mount($: any, on: On | undefined, surface: string, s: Partial<See
     return next(e)
   })
   on('fs.read', async (_$, e, next) => {
+    reads.push(String((e as any).path))
     // The engine resolves a relative path against the cwd before the hook sees it: match by suffix.
     const path = String((e as any).path)
     const text = Object.entries(seed.files).find(([f]) => path.endsWith(`/${f}`))?.[1]
@@ -196,6 +199,27 @@ describe('Evidence view', () => {
     await ui.press({ key: 'behaviour-b-place' })
     await ui.press({ key: `evidence-${OWNER}-0` })
     expect(await ui.find({ type: 'Text', text: /beyond the end of src\/orders\.ts \(2 lines\)/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a removed Step shows "removed in this PR" and its hunk, and reads no file', async ($, on) => {
+    const m = model()
+    const RHUNK = '@@ -8,1 +7,0 @@\n-audit.write(e)'
+    m.elements['audit-log'] = { id: 'audit-log', name: 'AuditLog', level: 'component', evidence: [{ file: 'src/audit/AuditLog.ts', startLine: 3, endLine: 20, symbol: 'AuditLog', status: 'unchecked' }] }
+    m.behaviours[0]!.steps.push({
+      id: 'base:s7', order: 7, from: 'order-service', to: 'audit-log', label: 'write audit entry', kind: 'effect', diff: 'removed',
+      evidence: [{ file: 'src/audit/AuditLog.ts', startLine: 8, endLine: 9, symbol: 'AuditLog.write', status: 'unchecked', hunk: RHUNK }],
+    })
+    reads.length = 0
+    const ui = await mount($, on, 'terminal', { model: m, files: { 'src/orders.ts': FILE, 'src/audit/AuditLog.ts': 'SHOULD NOT BE READ' } })
+    await ui.press({ key: 'behaviour-b-place' })
+    await ui.press({ key: 'evidence-step:b-place:base:s7-0' })
+    expect(await ui.find({ type: 'Text', text: /removed in this PR/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Loading source/ })).toBeUndefined()
+    expect(await sourceCode(ui, 'src/audit/AuditLog.ts')).toBeUndefined()
+    const diff = (await ui.findAll({ type: 'Code' })).find((c: any) => c.props.format === 'diff')
+    expect(diff.props.source).toBe(RHUNK)
+    expect(reads.some(p => p.endsWith('AuditLog.ts'))).toBe(false)
     await ui.unmount()
   })
 

@@ -150,6 +150,60 @@ describe('mcp__how__open', () => {
   })
 })
 
+describe('base Evidence (R25)', () => {
+  const AUDIT = 'src/audit/AuditLog.ts'
+  /** prSmall whose base Place an order also wrote an audit entry, in a file the PR deleted. */
+  const withRemovedAudit = (): BehaviourModel => {
+    const m = model()
+    m.elements['audit-log'] = {
+      id: 'audit-log',
+      name: 'AuditLog',
+      level: 'component',
+      evidence: [{ file: AUDIT, startLine: 3, endLine: 20, symbol: 'AuditLog', status: 'unchecked' }],
+    }
+    const base = m.baseBehaviours![0]!
+    base.elementIds = [...base.elementIds, 'audit-log']
+    base.steps = [
+      ...base.steps,
+      {
+        id: 's7', order: 7, from: 'order-service', to: 'audit-log', label: 'write audit entry', kind: 'effect', diff: 'unchanged',
+        evidence: [{ file: AUDIT, startLine: 8, endLine: 9, symbol: 'AuditLog.write', status: 'unchecked', hunk: '@@ -8,2 +7,0 @@\n-write(e) {\n-}' }],
+      },
+    ]
+    return m
+  }
+
+  test('a removed Step in a file deleted at head survives open and shows as removed', async ($, on) => {
+    const m = withRemovedAudit()
+    const { [AUDIT]: _deleted, ...files } = filesOf(m)
+    const w = world(on, { files })
+    const r = await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(r.result).toBe('2 Behaviours, 0 elements dropped')
+    const saved = written(w)
+    const removed = saved.behaviours[0]!.steps.find(s => s.id === 'base:s7')
+    expect(removed?.diff).toBe('removed')
+    expect(removed?.evidence[0]!.status).toBe('unchecked')
+    expect(saved.elements['audit-log']?.evidence[0]!.status).toBe('unchecked')
+    expect(saved.baseBehaviours![0]!.steps.some(s => s.id === 's7')).toBe(true)
+    expect(w.reads.some(p => p.endsWith(AUDIT))).toBe(false)
+    // Re-opening what was written keeps it.
+    await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(written(w).behaviours[0]!.steps.filter(s => s.id === 'base:s7')).toHaveLength(1)
+  })
+
+  test('an unchanged Step still drops when its file is missing', async ($, on) => {
+    const m = withRemovedAudit()
+    m.behaviours[0]!.steps.find(s => s.id === 's4')!.evidence = [
+      { file: 'src/gone.ts', startLine: 1, endLine: 2, symbol: 'gone', status: 'unchecked' },
+    ]
+    const { [AUDIT]: _deleted, 'src/gone.ts': _gone, ...files } = filesOf(m)
+    const w = world(on, { files })
+    const r = await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(String(r.result)).toContain('s4: file missing: src/gone.ts')
+    expect(written(w).behaviours[0]!.steps.some(s => s.id === 's4')).toBe(false)
+  })
+})
+
 describe('mcp__how__refresh', () => {
   test('refresh keeps navigation stack', async ($, on) => {
     const w = world(on, { files: filesOf(model()) })

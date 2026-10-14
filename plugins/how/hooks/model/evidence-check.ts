@@ -11,7 +11,37 @@ const TOLERANCE = 3
 
 type Checked = { evidence?: Evidence; reason?: string }
 
+const isRemoved = (x: { diff: string }) => x.diff === 'removed'
+
+/**
+ * Elements only base code uses: referenced by `baseBehaviours` or by removed Steps and error flows, and by nothing
+ * live at head (an Entry point, a Step or error-flow handler that is not removed, a Seam view). Their Evidence cites
+ * base code, so it is never checked against head files.
+ */
+export function baseOnlyElementIds(model: BehaviourModel): Set<string> {
+  const live = new Set<string>(Object.keys(model.seamViews))
+  const base = new Set<string>()
+  for (const v of Object.values(model.seamViews)) live.add(v.subjectId)
+  const refs = (b: Behaviour, into: (removed: boolean) => Set<string>, entryInto: Set<string>) => {
+    entryInto.add(b.entryPointId)
+    for (const s of b.steps) [s.from, s.to].forEach(id => into(isRemoved(s)).add(id))
+    for (const f of b.errorFlows) if (f.handler) into(isRemoved(f)).add(f.handler.elementId)
+  }
+  for (const b of model.behaviours) refs(b, removed => (removed ? base : live), live)
+  for (const b of model.baseBehaviours ?? []) {
+    refs(b, () => base, base)
+    b.elementIds.forEach(id => base.add(id))
+  }
+  return new Set([...base].filter(id => !live.has(id) && id in model.elements))
+}
+
+/**
+ * Verifies head content only: `baseBehaviours`, removed Steps and error flows, and base-only Elements keep the
+ * Evidence status their producer set and are never dropped for it (their code may be gone at head). They still lose
+ * Steps that touch a head Element the check dropped, so the model stays valid.
+ */
 export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile): Promise<EvidenceCheckResult> {
+  const baseOnly = baseOnlyElementIds(model)
   const cache = new Map<string, Promise<string[] | undefined>>()
   const lines = (path: string): Promise<string[] | undefined> => {
     let p = cache.get(path)
@@ -66,6 +96,10 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   const elements: BehaviourModel['elements'] = {}
   const droppedElements = new Set<string>()
   for (const [id, el] of Object.entries(model.elements)) {
+    if (baseOnly.has(id)) {
+      elements[id] = el
+      continue
+    }
     const { kept, reasons } = await checkList(el.evidence, id, false)
     if (kept.length === 0) {
       droppedElements.add(id)
@@ -111,7 +145,7 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   }
 
   // Behaviours (head and base)
-  const checkBehaviour = async (b: Behaviour): Promise<Behaviour | undefined> => {
+  const checkBehaviour = async (b: Behaviour, isBase: boolean): Promise<Behaviour | undefined> => {
     if (droppedElements.has(b.entryPointId)) {
       report(b.id, `entry point "${b.entryPointId}" was dropped`)
       return undefined
@@ -125,6 +159,10 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
         report(s.id, `touches dropped element "${gone}"`)
         continue
       }
+      if (isBase || isRemoved(s)) {
+        steps.push(s)
+        continue
+      }
       const { kept, reasons } = await checkList(s.evidence, s.id, false)
       if (kept.length === 0) {
         droppedSteps.add(s.id)
@@ -135,6 +173,14 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
     for (const f of b.errorFlows) {
       if (droppedSteps.has(f.originStepId)) {
         report(f.id, `origin step "${f.originStepId}" was dropped`)
+        continue
+      }
+      if (isBase || isRemoved(f)) {
+        const gone = f.handler !== undefined && droppedElements.has(f.handler.elementId)
+        if (gone) report(f.id, `handler element "${f.handler!.elementId}" was dropped`)
+        const kept = { ...f }
+        if (gone) delete (kept as { handler?: unknown }).handler
+        errorFlows.push(kept)
         continue
       }
       const transforms = []
@@ -156,14 +202,14 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   }
   const behaviours = []
   for (const b of model.behaviours) {
-    const c = await checkBehaviour(b)
+    const c = await checkBehaviour(b, false)
     if (c) behaviours.push(c)
   }
   let baseBehaviours: Behaviour[] | undefined
   if (model.baseBehaviours) {
     baseBehaviours = []
     for (const b of model.baseBehaviours) {
-      const c = await checkBehaviour(b)
+      const c = await checkBehaviour(b, true)
       if (c) baseBehaviours.push(c)
     }
   }

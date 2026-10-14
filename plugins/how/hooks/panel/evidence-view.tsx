@@ -62,7 +62,8 @@ export function renderEvidenceView(
   const snippet = snippets[snippetKey(item)]
   const lines = item.startLine === item.endLine ? `${item.startLine}` : `${item.startLine}-${item.endLine}`
   const verified = item.status === 'verified'
-  const abs = surface === 'terminal' && env.cwd !== undefined ? absolutePath(env.cwd, item.file) : undefined
+  const removed = owner.removed === true
+  const abs = surface === 'terminal' && env.cwd !== undefined && !removed ? absolutePath(env.cwd, item.file) : undefined
   const link = abs === undefined ? undefined : `vscode://file/${encodeURI(abs)}:${item.startLine}`
   const href = link !== undefined && link.length <= HREF_MAX ? link : undefined
   const to = (index: number) => () => env.openEvidence(ref.ownerId, index)
@@ -95,9 +96,15 @@ export function renderEvidenceView(
         ))}
       </Box>
       <Box key="evidence-status">
-        <Text color={verified ? 'green' : 'yellow'}>{verified ? 'verified' : 'inferred (not proven by the code)'}</Text>
+        <Text color={verified ? 'green' : 'yellow'}>
+          {verified ? 'verified' : removed ? 'base code (not checked against head)' : 'inferred (not proven by the code)'}
+        </Text>
       </Box>
-      {snippet === undefined ? (
+      {removed ? (
+        <Box key="evidence-removed">
+          <Text color="red">removed in this PR</Text>
+        </Box>
+      ) : snippet === undefined ? (
         <Box key="evidence-code-loading">
           <Text dimColor>Loading source…</Text>
         </Box>
@@ -116,7 +123,7 @@ export function renderEvidenceView(
       )}
       {item.hunk !== undefined && item.hunk !== '' && (
         <Box key="evidence-hunk" flexDirection="column">
-          <Text dimColor>Changed in this PR</Text>
+          <Text dimColor>{removed ? 'Removed lines' : 'Changed in this PR'}</Text>
           <Code path={item.file} format="diff" source={item.hunk} />
         </Box>
       )}

@@ -131,14 +131,27 @@ describe('verifyEvidence', () => {
     expect('model' in parsed).toBe(true)
   })
 
-  test('drops a baseBehaviours entry whose entry point was dropped and still parses', async () => {
+  test('drops a baseBehaviours entry whose entry point is a dropped head Element and still parses', async () => {
     const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'nope')], [ev('x.ts', 10, 10, 'needle')])
     const b = m.behaviours[0]!
-    m.behaviours = [{ ...b, entryPointId: 'a', elementIds: ['a'], steps: [] }]
     m.baseBehaviours = [{ ...b, id: 'base', entryPointId: 'b', elementIds: ['b'], steps: [] }]
     const r = await verifyEvidence(m, async () => file20)
+    expect(r.model.elements.b).toBeUndefined()
     expect(r.model.baseBehaviours?.length).toBe(0)
     expect(r.dropped.some(d => d.id === 'base')).toBe(true)
     expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
+
+  test('base-only Elements and base Steps are not checked against head files', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('gone.ts', 1, 2, 'Old')], [ev('gone.ts', 1, 2, 'Old')])
+    const b = m.behaviours[0]!
+    m.behaviours = [{ ...b, elementIds: ['a'], steps: [] }]
+    m.baseBehaviours = [b]
+    const reads: string[] = []
+    const r = await verifyEvidence(m, async f => (reads.push(f), f === 'x.ts' ? file20 : undefined))
+    expect(r.dropped).toEqual([])
+    expect(r.model.elements.b!.evidence[0]!.status).toBe('unchecked')
+    expect(r.model.baseBehaviours![0]!.steps[0]!.evidence[0]!.status).toBe('unchecked')
+    expect(reads).toEqual(['x.ts'])
   })
 })

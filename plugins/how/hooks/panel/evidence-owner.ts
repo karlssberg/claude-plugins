@@ -4,8 +4,12 @@
 // Two-part ids may hold ":" in either part (an Element id like `src/a.ts:Foo`): every colon split is tried and the
 // first one that resolves wins.
 import type { BehaviourModel, ErrorFlow, Evidence } from '../model/behaviour-model'
+import { baseOnlyElementIds } from '../model/evidence-check'
 
-export type EvidenceOwner = { label: string; evidence: Evidence[] }
+/** `removed`: the owner is code the PR removed (a removed Step or error flow, a base-only Element). */
+export type EvidenceOwner = { label: string; evidence: Evidence[]; removed?: boolean }
+
+const removedIf = (yes: boolean) => (yes ? { removed: true } : {})
 
 export const ownerId = {
   element: (elementId: string) => `element:${elementId}`,
@@ -44,7 +48,7 @@ export function resolveEvidenceOwner(model: BehaviourModel, id: string): Evidenc
   switch (kind) {
     case 'element': {
       const e = model.elements[rest]
-      return e && { label: e.name, evidence: e.evidence }
+      return e && { label: e.name, evidence: e.evidence, ...removedIf(baseOnlyElementIds(model).has(rest)) }
     }
     case 'seam': {
       const s = model.seams[rest]
@@ -52,7 +56,7 @@ export function resolveEvidenceOwner(model: BehaviourModel, id: string): Evidenc
     }
     case 'step': {
       const s = firstOf(rest, (bid, sid) => model.behaviours.find(b => b.id === bid)?.steps.find(st => st.id === sid))
-      return s ? { label: s.label, evidence: s.evidence } : undefined
+      return s ? { label: s.label, evidence: s.evidence, ...removedIf(s.diff === 'removed') } : undefined
     }
     case 'flow': {
       const n = firstOf(rest, (sid, nid) => model.seamViews[sid]?.nodes.find(nd => nd.id === nid))
@@ -62,7 +66,7 @@ export function resolveEvidenceOwner(model: BehaviourModel, id: string): Evidenc
       const f = firstOf(rest, (bid, fid) => model.behaviours.find(b => b.id === bid)?.errorFlows.find(ef => ef.id === fid))
       if (!f) return undefined
       const into = f.transforms.map(t => t.into).join(' → ')
-      return { label: `Error flow ${f.id}${into ? `: ${into}` : ''}`, evidence: errorFlowEvidence(f) }
+      return { label: `Error flow ${f.id}${into ? `: ${into}` : ''}`, evidence: errorFlowEvidence(f), ...removedIf(f.diff === 'removed') }
     }
     default:
       return undefined
