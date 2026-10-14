@@ -52,23 +52,23 @@ describe('verifyEvidence', () => {
     const m = tiny([ev('x.ts', 10, 11, 'needle')], [ev('x.ts', 12, 12, 'needle')], [ev('x.ts', 8, 9, 'needle')])
     const r = await verifyEvidence(m, async () => file20)
     expect(r.dropped.length).toBe(0)
-    expect(r.model.elements.a?.evidence[0].status).toBe('verified')
-    expect(r.model.elements.b.evidence[0].status).toBe('verified') // within +-3
-    expect(r.model.behaviours[0].steps[0].evidence[0].status).toBe('verified')
-    expect(m.elements.a.evidence[0].status).toBe('unchecked') // input not mutated
+    expect(r.model.elements.a?.evidence[0]?.status).toBe('verified')
+    expect(r.model.elements.b?.evidence[0]?.status).toBe('verified') // within +-3
+    expect(r.model.behaviours[0]?.steps[0]?.evidence[0]?.status).toBe('verified')
+    expect(m.elements.a?.evidence[0]?.status).toBe('unchecked') // input not mutated
   })
 
   test('marks inferred when symbol is elsewhere in the file', async () => {
     const m = tiny([ev('x.ts', 1, 2, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
     const r = await verifyEvidence(m, async () => file20)
-    expect(r.model.elements.a?.evidence[0].status).toBe('inferred')
+    expect(r.model.elements.a?.evidence[0]?.status).toBe('inferred')
     expect(r.dropped.length).toBe(0)
   })
 
   test('drops a Step whose only evidence is in a missing file and reports why', async () => {
     const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('gone.ts', 1, 2, 'q')])
     const r = await verifyEvidence(m, async p => (p === 'x.ts' ? file20 : undefined))
-    expect(r.model.behaviours[0].steps.length).toBe(0)
+    expect(r.model.behaviours[0]?.steps.length).toBe(0)
     expect(r.dropped).toEqual([{ id: 's1', reason: 'file missing: gone.ts' }])
   })
 
@@ -76,8 +76,8 @@ describe('verifyEvidence', () => {
     const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'nope')], [ev('x.ts', 10, 10, 'needle')])
     const r = await verifyEvidence(m, async () => file20)
     expect(r.model.elements.b).toBeUndefined()
-    expect(r.model.behaviours[0].elementIds).toEqual(['a'])
-    expect(r.model.behaviours[0].steps.length).toBe(0)
+    expect(r.model.behaviours[0]?.elementIds).toEqual(['a'])
+    expect(r.model.behaviours[0]?.steps.length).toBe(0)
     const ids = r.dropped.map(d => d.id)
     expect(ids).toContain('b')
     expect(ids).toContain('s1')
@@ -93,7 +93,7 @@ describe('verifyEvidence', () => {
     )
     const r = await verifyEvidence(m, async p => (p === 'x.ts' ? file20 : undefined))
     expect(r.model.elements.a).toBeUndefined()
-    expect(r.model.elements.b.evidence[0].status).toBe('verified')
+    expect(r.model.elements.b?.evidence[0]?.status).toBe('verified')
     expect(r.dropped.some(d => d.id === 'a')).toBe(true)
   })
 

@@ -11,6 +11,8 @@ declare module 'claude-code' {
           subject: { kind: 'behaviour'; behaviourId: string } | { kind: 'seam'; subjectId: string; behaviourId: string }
           modelPath: string
           fragmentName: string
+          /** Fragments it submitted that failed to parse or validate. */
+          rejected?: number
         }
       }
       snippets: { [key: string]: { source: string; startLine: number; more?: number } | { error: string } }
