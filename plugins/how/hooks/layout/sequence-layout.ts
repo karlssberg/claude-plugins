@@ -19,7 +19,7 @@ const isInferred = (evidence: Evidence[]) => evidence.length > 0 && evidence.eve
 
 type Row =
   | { kind: 'step'; id: string; from: string; to: string; label: string; diff: DiffStatus; inferred: boolean; seam: boolean; stepIds: string[] }
-  | { kind: 'error'; id: string; from: string; to: string; label: string; diff: DiffStatus; swallowed: boolean }
+  | { kind: 'error'; id: string; from: string; to: string; label: string; diff: DiffStatus; swallowed: boolean; seam: boolean }
 
 export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: LayoutOpts): Layout {
   // 1. Lifeline candidates in order of first appearance: entry point, Step endpoints, elementIds, error handlers.
@@ -48,14 +48,17 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
       pinned.add(s.to)
     }
   }
-  const fold = (extra: string[]) =>
-    foldToBudget(candidates, model.elements, { budget: BUDGET, cap: CAP, pinned: [...pinned, ...extra] })
-  let folded = fold([])
+  // Lifelines need about 6 cells each; never fold to a budget wider than the width allows.
+  const limit = Math.max(1, Math.floor(opts.maxCols / 6))
+  // Expanded group ids are resolved against the first fold, so they stay stable between toggles: the
+  // expanded groups are simply dropped from that fold (their members become visible lifelines).
+  const first = foldToBudget(candidates, model.elements, {
+    budget: Math.min(BUDGET, limit),
+    cap: Math.min(CAP, limit),
+    pinned: [...pinned],
+  })
   const expanded = new Set(opts.expandedGroups ?? [])
-  if (expanded.size) {
-    const members = folded.groups.filter(g => expanded.has(g.id)).flatMap(g => g.memberIds)
-    if (members.length) folded = fold(members)
-  }
+  const folded = { ...first, groups: first.groups.filter(g => !expanded.has(g.id)) }
   const groupOf = new Map<string, string>()
   for (const g of folded.groups) for (const m of g.memberIds) groupOf.set(m, g.id)
   const groupIds = new Set(folded.groups.map(g => g.id))
@@ -71,7 +74,9 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
   const rows: Row[] = []
   const rowOfStep = new Map<string, number>()
   const n = laneOrder.length
-  const colWidth = Math.min(MAX_COL_WIDTH, Math.max(HEADER.minColWidth, Math.floor(opts.maxCols / Math.max(1, n))))
+  // If pinned lifelines alone exceed what fits, columns shrink below minColWidth so cols never exceeds
+  // maxCols; header and message labels degrade (down to "…") there.
+  const colWidth = Math.min(MAX_COL_WIDTH, Math.max(2, Math.floor(opts.maxCols / Math.max(1, n))))
   const total = n * colWidth
   const centerOf = new Map<string, number>()
   laneOrder.forEach((id, i) => centerOf.set(id, i * colWidth + Math.floor((colWidth - HEADER.gap) / 2)))
@@ -91,7 +96,7 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
         continue
       }
       rowOfStep.set(s.id, rows.length)
-      rows.push({ kind: 'step', id: s.id, from, to, label: '1 internal steps', diff: 'unchanged', inferred: false, seam: false, stepIds: [s.id] })
+      rows.push({ kind: 'step', id: s.id, from, to, label: '1 internal step', diff: 'unchanged', inferred: false, seam: false, stepIds: [s.id] })
       continue
     }
     rowOfStep.set(s.id, rows.length)
@@ -108,21 +113,32 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
     })
   }
   if (opts.showErrors) {
-    const inserts: { at: number; row: Row }[] = []
+    const after = new Map<number, Row[]>()
     for (const f of b.errorFlows) {
-      const at = rowOfStep.get(f.originStepId)
       const origin = b.steps.find(s => s.id === f.originStepId)
-      if (at === undefined || !origin) continue
-      const from = lane(origin.to)
-      const handler = f.handler ? lane(f.handler.elementId) : from
-      const into = f.transforms.length ? f.transforms[f.transforms.length - 1]!.into : 'error'
-      inserts.push({
-        at,
-        row: { kind: 'error', id: `error:${f.id}:0`, from, to: handler, label: truncate(into, labelWidth(from, handler)), diff: f.diff, swallowed: f.isSwallowed },
-      })
+      const at = rowOfStep.get(f.originStepId)
+      if (!origin || at === undefined) continue
+      const out: Row[] = []
+      let cur = lane(origin.to)
+      const push = (to: string, label: string, seam: boolean, swallowed: boolean) =>
+        out.push({ kind: 'error', id: `error:${f.id}:${out.length}`, from: cur, to, label: truncate(label, labelWidth(cur, to)), diff: f.diff, swallowed, seam })
+      for (const t of f.transforms) {
+        const crossing = b.steps.filter(s => s.seamId === t.seamId)
+        const step = crossing.filter(s => s.order <= origin.order).pop() ?? crossing[crossing.length - 1]
+        if (step) {
+          const to = lane(step.from)
+          push(to, t.into, true, false)
+          cur = to
+        } else push(cur, t.into, false, false)
+      }
+      if (f.handler) push(lane(f.handler.elementId), 'handled', false, f.isSwallowed)
+      else push(cur, 'unhandled', false, f.isSwallowed)
+      after.set(at, [...(after.get(at) ?? []), ...out])
     }
-    // Insert from the back so earlier indices stay valid; same-origin flows keep their order.
-    inserts.reverse().forEach(({ at, row }) => rows.splice(at + 1, 0, row))
+    const merged: Row[] = []
+    rows.forEach((r, i) => merged.push(r, ...(after.get(i) ?? [])))
+    rows.length = 0
+    rows.push(...merged)
   }
 
   // 4. Nodes (lifeline headers).
@@ -143,7 +159,7 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
     const full = group ? group.label : (model.elements[id]?.name ?? id)
     return {
       id,
-      label: truncate(full, colWidth - HEADER.gap - 2),
+      label: truncate(full, colWidth - HEADER.gap <= 4 ? colWidth - HEADER.gap : colWidth - HEADER.gap - 2),
       rect: { col: i * colWidth, row: HEADER.top, cols: colWidth - HEADER.gap, rows: HEADER.rows },
       style,
     }
@@ -164,7 +180,7 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
     const base = { diff: r.diff, isGroup: false, isFaded: nodes.find(nd => nd.id === r.from)!.style.isFaded || nodes.find(nd => nd.id === r.to)!.style.isFaded }
     return r.kind === 'step'
       ? { id: r.id, from: r.from, to: r.to, label: r.label, points, style: { ...base, isInferred: r.inferred, isSeamCrossing: r.seam } }
-      : { id: r.id, from: r.from, to: r.to, label: r.label, points, style: { ...base, isInferred: false, isError: true, isSwallowed: r.swallowed, isSeamCrossing: false } }
+      : { id: r.id, from: r.from, to: r.to, label: r.label, points, style: { ...base, isInferred: false, isError: true, isSwallowed: r.swallowed, isSeamCrossing: r.seam } }
   })
 
   return { cols: total, rows: HEADER.firstMessageRow + rows.length * HEADER.rowStep, nodes, edges }

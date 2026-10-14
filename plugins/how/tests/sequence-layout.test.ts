@@ -53,19 +53,65 @@ describe('layoutBehaviourView', () => {
     expect(label.length).toBeLessThan(60)
   })
 
-  test('showErrors adds dashed error rows after origin step', () => {
+  test('showErrors adds one error row per hop after the origin step', () => {
     const m = load()
     const b = m.behaviours[0]!
     const off = layoutBehaviourView(b, m, opts)
     const on = layoutBehaviourView(b, m, { ...opts, showErrors: true })
-    expect(on.edges.length).toBe(off.edges.length + 1)
+    expect(on.edges.length).toBe(off.edges.length + 2)
     const ids = on.edges.map(e => e.id)
     const i = ids.indexOf('error:ef1:0')
     expect(i).toBe(ids.indexOf('s3') + 1)
-    const e = on.edges[i]!
-    expect(e.style.isError).toBe(true)
-    expect(e.to).toBe('error-mw')
-    expect(e.points[0]!.row).toBeGreaterThan(on.edges[i - 1]!.points[0]!.row)
+    expect(ids[i + 1]).toBe('error:ef1:1')
+    const [hop, handled] = [on.edges[i]!, on.edges[i + 1]!]
+    expect([hop.from, hop.to, hop.label, hop.style.isSeamCrossing]).toEqual(['inventory', 'order-service', 'OutOfStockError', true])
+    expect([handled.from, handled.to, handled.label]).toEqual(['order-service', 'error-mw', 'handled'])
+    expect(hop.style.isError).toBe(true)
+    expect(handled.points[0]!.row).toBeGreaterThan(hop.points[0]!.row)
+  })
+
+  test('multi-transform flow without handler walks back across seams then self-loops unhandled', () => {
+    const m = load()
+    const b = JSON.parse(JSON.stringify(m.behaviours[0]!)) as typeof m.behaviours[0]
+    b!.errorFlows = [
+      { id: 'efx', originStepId: 's5', transforms: [{ seamId: 'seam-repo', into: 'DbError', evidence: [] }, { seamId: 'seam-nope', into: 'Lost', evidence: [] }], isSwallowed: true, isCatchAll: false, diff: 'added' },
+    ]
+    const l = layoutBehaviourView(b!, m, { ...opts, showErrors: true })
+    const rows = l.edges.filter(e => e.id.startsWith('error:efx'))
+    expect(rows.map(e => e.id)).toEqual(['error:efx:0', 'error:efx:1', 'error:efx:2'])
+    expect(rows.map(e => e.label)).toEqual(['DbError', 'Lost', 'unhandled'])
+    expect(rows[0]!.from).toBe('order-repo')
+    expect(rows[0]!.to).toBe('order-service')
+    expect(rows[1]!.from).toBe(rows[1]!.to)
+    expect(rows[2]!.from).toBe(rows[2]!.to)
+    expect(rows[2]!.style.isSwallowed).toBe(true)
+  })
+
+  test('error rows follow their own origin even when errorFlows are out of order', () => {
+    const m = load()
+    const b = JSON.parse(JSON.stringify(m.behaviours[0]!)) as typeof m.behaviours[0]
+    const mk = (id: string, origin: string) => ({ id, originStepId: origin, transforms: [], isSwallowed: false, isCatchAll: false, diff: 'unchanged' as const })
+    b!.errorFlows = [mk('late', 's5'), mk('early', 's2')]
+    const ids = layoutBehaviourView(b!, m, { ...opts, showErrors: true }).edges.map(e => e.id)
+    expect(ids.indexOf('error:early:0')).toBe(ids.indexOf('s2') + 1)
+    expect(ids.indexOf('error:late:0')).toBe(ids.indexOf('s5') + 1)
+  })
+
+  test('12+ pinned lifelines at maxCols 40 stay within width with legible headers', () => {
+    const m = load()
+    const elements = { ...m.elements }
+    const ids: string[] = []
+    const steps = []
+    for (let i = 0; i < 13; i++) {
+      elements[`y${i}`] = { id: `y${i}`, name: `Svc${i}`, level: 'code', evidence: [] }
+      ids.push(`y${i}`)
+      if (i) steps.push({ ...m.behaviours[0]!.steps[0]!, id: `t${i}`, order: i, from: `y${i - 1}`, to: `y${i}`, label: 'call', diff: 'changed' as const })
+    }
+    const b = { ...m.behaviours[0]!, entryPointId: 'y0', elementIds: ids, steps, errorFlows: [] }
+    const l = layoutBehaviourView(b, { ...m, elements }, { maxCols: 40, showErrors: false })
+    expect(l.cols).toBeLessThanOrEqual(40)
+    for (const n of l.nodes) expect(n.rect.col + n.rect.cols).toBeLessThanOrEqual(40)
+    expect(l.nodes.some(n => n.label !== '…')).toBe(true)
   })
 
   test('fits within maxCols', () => {
@@ -115,5 +161,25 @@ describe('layoutBehaviourView', () => {
     expect(internal[0]!.label).toBe('2 internal steps')
     const expanded = layoutBehaviourView(b, { ...m, elements }, { ...opts, expandedGroups: ['group:pkg'] })
     expect(expanded.nodes.some(n => n.id === 'x0')).toBe(true)
+  })
+})
+
+describe('group expansion', () => {
+  test('expanding group:other from the first fold shows its members', () => {
+    const m = load()
+    const elements = { ...m.elements }
+    const ids = ['client', 'orders-api']
+    for (let i = 0; i < 20; i++) {
+      elements[`z${i}`] = { id: `z${i}`, name: `Z${i}`, level: 'code', evidence: [] }
+      ids.push(`z${i}`)
+    }
+    const b = { ...m.behaviours[0]!, elementIds: ids, steps: [m.behaviours[0]!.steps[0]!], errorFlows: [] }
+    const model = { ...m, elements }
+    const first = layoutBehaviourView(b, model, opts)
+    const other = first.nodes.find(n => n.style.isGroup)!
+    expect(other.id).toBe('group:other')
+    const again = layoutBehaviourView(b, model, { ...opts, expandedGroups: [other.id] })
+    expect(again.nodes.some(n => n.id === 'z0')).toBe(true)
+    expect(again.nodes.some(n => n.id === other.id)).toBe(false)
   })
 })
