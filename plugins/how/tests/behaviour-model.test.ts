@@ -62,4 +62,43 @@ describe('parseBehaviourModel', () => {
     m.behaviours[0].errorFlows[0].originStepId = 'zzz'
     expect(errorOf(m)).toContain('ef1')
   })
+
+  test('ids that name Object.prototype members name nothing', async () => {
+    for (const ghost of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      const step = clone()
+      step.behaviours[0].steps[1].to = ghost
+      expect(errorOf(step)).toContain(`"to" "${ghost}" names no Element`)
+      const seam = clone()
+      seam.behaviours[0].steps[2].seamId = ghost
+      expect(errorOf(seam)).toContain(`seamId "${ghost}" names no Seam`)
+      const listed = clone()
+      listed.behaviours[0].elementIds.push(ghost)
+      expect(errorOf(listed)).toContain(`lists elementId "${ghost}" that names no Element`)
+      const parent = clone()
+      parent.elements.client.parentId = ghost
+      expect(errorOf(parent)).toContain(`parentId "${ghost}" names no Element`)
+      const view = clone()
+      view.seamViews['order-service'].subjectId = ghost
+      expect(errorOf(view)).toContain(`subject "${ghost}" names no Element or Seam`)
+      const handler = clone()
+      handler.behaviours[0].errorFlows[0].handler = { elementId: ghost, evidence: [] }
+      expect(errorOf(handler)).toContain(`elementId "${ghost}" names no Element`)
+      const transform = clone()
+      transform.behaviours[0].errorFlows[0].transforms[0].seamId = ghost
+      expect(errorOf(transform)).toContain(`seamId "${ghost}" names no Seam`)
+    }
+  })
+
+  test('rejects duplicate error-flow ids within a Behaviour', async () => {
+    const m = clone()
+    const flows = m.behaviours[0].errorFlows
+    flows.push({ ...flows[0] })
+    expect(errorOf(m)).toContain('duplicate error flow id "ef1"')
+  })
+
+  test('rejects duplicate baseBehaviours ids', async () => {
+    const m = clone()
+    m.baseBehaviours.push(JSON.parse(JSON.stringify(m.baseBehaviours[0])))
+    expect(errorOf(m)).toContain(`duplicate base Behaviour id "${m.baseBehaviours[0].id}"`)
+  })
 })

@@ -183,7 +183,7 @@ function checkSeamView(key: string, v: unknown, elements: Obj, seams: Obj): void
   const w = `Seam view "${key}"`
   const o = obj(v, w)
   const subject = str(o, 'subjectId', w)
-  if (!(subject in elements) && !(subject in seams)) fail(`${w} subject "${subject}" names no Element or Seam`)
+  if (!Object.hasOwn(elements, subject) && !Object.hasOwn(seams, subject)) fail(`${w} subject "${subject}" names no Element or Seam`)
   oneOf(o, 'status', BUILD, w)
   const ids = new Set<string>()
   arr(o.nodes, `${w} nodes`).forEach(n => {
@@ -227,12 +227,12 @@ function checkBehaviour(v: unknown, elements: Obj, seams: Obj, where: string): v
   })
   const elementIds = strList(o.elementIds, `${w} elementIds`)
   elementIds.forEach(id => {
-    if (!(id in elements)) fail(`${w} lists elementId "${id}" that names no Element`)
+    if (!Object.hasOwn(elements, id)) fail(`${w} lists elementId "${id}" that names no Element`)
   })
   if (!elementIds.includes(entry)) fail(`${w} entry point "${entry}" is missing from its elementIds`)
   const seamIds = strList(o.seamIds, `${w} seamIds`)
   seamIds.forEach(id => {
-    if (!(id in seams)) fail(`${w} lists seamId "${id}" that names no Seam`)
+    if (!Object.hasOwn(seams, id)) fail(`${w} lists seamId "${id}" that names no Seam`)
   })
   const stepIds = new Set<string>()
   arr(o.steps, `${w} steps`).forEach(s => {
@@ -244,34 +244,37 @@ function checkBehaviour(v: unknown, elements: Obj, seams: Obj, where: string): v
     num(sid0, 'order', sw)
     const from = str(sid0, 'from', sw)
     const to = str(sid0, 'to', sw)
-    if (!(from in elements)) fail(`${sw} "from" "${from}" names no Element`)
-    if (!(to in elements)) fail(`${sw} "to" "${to}" names no Element`)
+    if (!Object.hasOwn(elements, from)) fail(`${sw} "from" "${from}" names no Element`)
+    if (!Object.hasOwn(elements, to)) fail(`${sw} "to" "${to}" names no Element`)
     str(sid0, 'label', sw)
     oneOf(sid0, 'kind', STEP_KIND, sw)
     optStr(sid0, 'seamId', sw)
-    if (typeof sid0.seamId === 'string' && !(sid0.seamId in seams)) {
+    if (typeof sid0.seamId === 'string' && !Object.hasOwn(seams, sid0.seamId)) {
       fail(`${sw} seamId "${sid0.seamId}" names no Seam`)
     }
     oneOf(sid0, 'diff', DIFF, sw)
     checkEvidenceList(sid0, 'evidence', sw)
   })
+  const flowIds = new Set<string>()
   arr(o.errorFlows, `${w} errorFlows`).forEach(f => {
     const fo = obj(f, `Error flow in ${w}`)
     const fid = str(fo, 'id', `Error flow in ${w}`)
     const fw = `Error flow "${fid}" of ${w}`
+    if (flowIds.has(fid)) fail(`${w} has duplicate error flow id "${fid}"`)
+    flowIds.add(fid)
     const origin = str(fo, 'originStepId', fw)
     if (!stepIds.has(origin)) fail(`${fw} origin step "${origin}" names no step`)
     arr(fo.transforms, `${fw} transforms`).forEach(t => {
       const to = obj(t, `Transform in ${fw}`)
       const sm = str(to, 'seamId', `Transform in ${fw}`)
-      if (!(sm in seams)) fail(`Transform in ${fw} seamId "${sm}" names no Seam`)
+      if (!Object.hasOwn(seams, sm)) fail(`Transform in ${fw} seamId "${sm}" names no Seam`)
       str(to, 'into', `Transform in ${fw}`)
       checkEvidenceList(to, 'evidence', `Transform in ${fw}`)
     })
     if (fo.handler !== undefined) {
       const h = obj(fo.handler, `Handler of ${fw}`)
       const el = str(h, 'elementId', `Handler of ${fw}`)
-      if (!(el in elements)) fail(`Handler of ${fw} elementId "${el}" names no Element`)
+      if (!Object.hasOwn(elements, el)) fail(`Handler of ${fw} elementId "${el}" names no Element`)
       checkEvidenceList(h, 'evidence', `Handler of ${fw}`)
     }
     bool(fo, 'isSwallowed', fw)
@@ -310,7 +313,7 @@ function validate(raw: unknown): BehaviourModel {
   for (const [k, s] of Object.entries(seams)) checkSeam(k, s)
   for (const [k, e] of Object.entries(elements)) {
     const p = (e as Obj).parentId
-    if (typeof p === 'string' && !(p in elements)) fail(`Element "${k}" parentId "${p}" names no Element`)
+    if (typeof p === 'string' && !Object.hasOwn(elements, p)) fail(`Element "${k}" parentId "${p}" names no Element`)
   }
   const seamViews = obj(root.seamViews, 'Behaviour model seamViews')
   for (const [k, sv] of Object.entries(seamViews)) checkSeamView(k, sv, elements, seams)
@@ -323,7 +326,13 @@ function validate(raw: unknown): BehaviourModel {
     seen.add(id)
   })
   if (root.baseBehaviours !== undefined) {
-    arr(root.baseBehaviours, 'baseBehaviours').forEach(b => checkBehaviour(b, elements, seams, 'baseBehaviours'))
+    const seenBase = new Set<string>()
+    arr(root.baseBehaviours, 'baseBehaviours').forEach(b => {
+      checkBehaviour(b, elements, seams, 'baseBehaviours')
+      const id = (b as Obj).id as string
+      if (seenBase.has(id)) fail(`duplicate base Behaviour id "${id}"`)
+      seenBase.add(id)
+    })
   }
 
   arr(root.incidentalChanges, 'incidentalChanges').forEach((c, i) => {

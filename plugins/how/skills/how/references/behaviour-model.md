@@ -98,4 +98,4 @@ type BehaviourModel = {
 - `behaviours`, `elements`, `seams`, `seamViews`: as above; `seamViews` is keyed by Element id or Seam id.
 - `elements`: in PR mode, the union of the head and base Elements, so the Steps of `baseBehaviours` resolve.
 - `incidentalChanges`: Incidental changes with `file`, `hunk` and a `reason`.
-- `baseBehaviours`: PR mode only; the same Behaviours as at base, matched by entry point Element name, used for the diff.
+- `baseBehaviours`: PR mode only; the same Behaviours as at base, matched by entry point Element name, used for the diff. Their ids are unique across `baseBehaviours`.
