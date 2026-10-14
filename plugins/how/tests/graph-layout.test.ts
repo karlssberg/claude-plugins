@@ -13,6 +13,16 @@ const load = (): BehaviourModel => {
 const overlap = (a: CellRect, b: CellRect) =>
   a.col < b.col + b.cols && b.col < a.col + a.cols && a.row < b.row + b.rows && b.row < a.row + a.rows
 
+const expectDisjointWithin = (rects: CellRect[], maxCols: number) => {
+  for (const r of rects) {
+    expect(r.col).toBeGreaterThanOrEqual(0)
+    expect(r.cols).toBeGreaterThanOrEqual(1)
+    expect(r.col + r.cols).toBeLessThanOrEqual(maxCols)
+  }
+  for (let i = 0; i < rects.length; i++)
+    for (let j = i + 1; j < rects.length; j++) expect(overlap(rects[i]!, rects[j]!)).toBe(false)
+}
+
 describe('layoutGraph', () => {
   test('lays out 3 nodes with non-overlapping cell rects', async () => {
     const l = await layoutGraph(
@@ -64,7 +74,23 @@ describe('layoutGraph', () => {
     const edges = nodes.slice(1).map((n, i) => ({ id: `e${i}`, from: `n${Math.floor(i / 2)}`, to: n.id, isError: false }))
     const l = await layoutGraph({ nodes, edges }, { maxCols: 120, direction: 'DOWN' })
     expect(l.nodes).toHaveLength(20)
+    expectDisjointWithin(l.nodes.map(n => n.rect), 120)
     expect(l.edges).toHaveLength(19)
+  })
+
+  test('a single layer of 16 nodes squeezed into 40 cols stays disjoint and in bounds', async () => {
+    const nodes = [{ id: 'root', label: 'root', style }, ...Array.from({ length: 16 }, (_, i) => ({ id: `k${i}`, label: `child number ${i}`, style }))]
+    const edges = nodes.slice(1).map(n => ({ id: `e-${n.id}`, from: 'root', to: n.id, isError: false, isSeamCrossing: true }))
+    const l = await layoutGraph({ nodes, edges }, { maxCols: 40, direction: 'DOWN' })
+    expect(l.cols).toBeLessThanOrEqual(40)
+    expectDisjointWithin(l.nodes.map(n => n.rect), 40)
+    for (const e of l.edges) {
+      expect(e.style.isSeamCrossing).toBe(true)
+      for (const p of e.points) expect(p.col).toBeLessThan(40)
+      const to = l.nodes.find(n => n.id === e.to)!.rect
+      const last = e.points[e.points.length - 1]!
+      expect(last.col >= to.col && last.col < to.col + to.cols).toBe(true)
+    }
   })
 
   test('is deterministic', async () => {

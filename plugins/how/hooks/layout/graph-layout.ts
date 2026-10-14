@@ -2,12 +2,12 @@
 import dagre from '../vendor/dagre.mjs'
 import type { SeamView } from '../model/behaviour-model'
 import type { Evidence } from '../model/behaviour-model'
-import type { Layout, LayoutEdge, LayoutNode, NodeStyle } from './geometry'
+import type { CellRect, Layout, LayoutEdge, LayoutNode, NodeStyle } from './geometry'
 import { truncate } from './sequence-layout'
 
 export type GraphInput = {
   nodes: { id: string; label: string; style: NodeStyle }[]
-  edges: { id: string; from: string; to: string; label?: string; isError: boolean }[]
+  edges: { id: string; from: string; to: string; label?: string; isError: boolean; isSeamCrossing?: boolean }[]
 }
 
 const NODE_ROWS = 3
@@ -46,6 +46,36 @@ function extent(r: Run): number {
   return max
 }
 
+const rowsOverlap = (a: CellRect, b: CellRect) => a.row < b.row + b.rows && b.row < a.row + a.rows
+
+// Makes same-row rects disjoint and inside [0, maxCols). Pass 1 pushes right, pass 2 pulls back left and
+// narrows where needed (min width 1). The bound is exact: it holds whenever no more than maxCols rects
+// share a row band (each needs at least 1 cell); beyond that, no layout in maxCols cells can exist.
+function resolveCollisions(nodes: LayoutNode[], maxCols: number): LayoutNode[] {
+  const order = [...nodes].sort((x, y) => x.rect.col - y.rect.col || x.rect.row - y.rect.row)
+  order.forEach((n, i) => {
+    let col = Math.max(0, n.rect.col)
+    for (let j = 0; j < i; j++) {
+      const m = order[j]!.rect
+      if (rowsOverlap(m, n.rect)) col = Math.max(col, m.col + m.cols)
+    }
+    n.rect = { ...n.rect, col }
+  })
+  for (let i = order.length - 1; i >= 0; i--) {
+    const n = order[i]!
+    let bound = maxCols
+    for (let j = i + 1; j < order.length; j++) {
+      const m = order[j]!.rect
+      if (rowsOverlap(m, n.rect)) bound = Math.min(bound, m.col)
+    }
+    if (n.rect.col + n.rect.cols > bound) {
+      const col = Math.max(0, bound - n.rect.cols)
+      n.rect = { ...n.rect, col, cols: Math.max(1, Math.min(n.rect.cols, bound - col)) }
+    }
+  }
+  return nodes
+}
+
 export async function layoutGraph(
   input: GraphInput,
   opts: { maxCols: number; direction: 'DOWN' | 'RIGHT' },
@@ -77,35 +107,39 @@ export async function layoutGraph(
       style: src.style,
     })
   }
-  // Still too wide (many nodes in one layer even at minimum width): compress columns proportionally.
+  // Still too wide (many nodes in one layer even at minimum width): compress columns proportionally, then
+  // resolve collisions. Rounding and compression can leave same-row rects touching, so the resolve passes always run.
   let width = extent(g)
   let scale = 1
   if (width > opts.maxCols) {
     scale = opts.maxCols / width
     for (const n of placed.values()) {
-      const col = Math.floor(n.rect.col * scale)
-      const cols = Math.max(2, Math.floor(n.rect.cols * scale))
-      n.rect = { ...n.rect, col, cols }
-      n.label = truncate(n.label, Math.max(1, cols - 2))
+      n.rect = { ...n.rect, col: Math.floor(n.rect.col * scale), cols: Math.max(1, Math.floor(n.rect.cols * scale)) }
     }
     width = opts.maxCols
   }
-  const nodes = [...placed.values()]
+  const nodes = resolveCollisions([...placed.values()], opts.maxCols)
+  for (const n of nodes) n.label = truncate(byId.get(n.id)!.label, Math.max(1, n.rect.cols - PAD))
 
   const edges: LayoutEdge[] = []
   for (const src of clean.edges) {
     const raw = g.edges.get(src.id) ?? []
+    const a = placed.get(src.from)!.rect
+    const b = placed.get(src.to)!.rect
+    const within = (col: number, r: CellRect) => Math.min(r.col + r.cols - 1, Math.max(r.col, col))
     let points = raw.map(p => ({
       col: Math.min(opts.maxCols - 1, Math.max(0, Math.floor(Math.round(p.x) * scale))),
       row: Math.max(0, Math.round(p.y)),
     }))
     if (points.length < 2) {
-      const a = placed.get(src.from)!.rect
-      const b = placed.get(src.to)!.rect
       points = [
         { col: a.col + Math.floor(a.cols / 2), row: a.row + a.rows },
         { col: b.col + Math.floor(b.cols / 2), row: b.row },
       ]
+    } else {
+      // Endpoints stay attached to the final (possibly shifted) rects.
+      points[0] = { ...points[0]!, col: within(points[0]!.col, a) }
+      points[points.length - 1] = { ...points[points.length - 1]!, col: within(points[points.length - 1]!.col, b) }
     }
     const from = byId.get(src.from)!.style
     const to = byId.get(src.to)!.style
@@ -121,7 +155,7 @@ export async function layoutGraph(
         isGroup: false,
         isFaded: from.isFaded && to.isFaded,
         isError: src.isError,
-        isSeamCrossing: false,
+        isSeamCrossing: src.isSeamCrossing ?? false,
       },
     })
   }
