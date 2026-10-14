@@ -94,6 +94,11 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   // Seam views
   const seamViews: BehaviourModel['seamViews'] = {}
   for (const [key, view] of Object.entries(model.seamViews)) {
+    const gone = [key, view.subjectId].find(id => droppedElements.has(id))
+    if (gone !== undefined) {
+      report(key, `names dropped element "${gone}"`)
+      continue
+    }
     const nodes = []
     for (const n of view.nodes) nodes.push({ ...n, evidence: (await checkList(n.evidence, n.id, true)).kept })
     seamViews[key] = { ...view, nodes }
@@ -106,7 +111,11 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   }
 
   // Behaviours (head and base)
-  const checkBehaviour = async (b: Behaviour): Promise<Behaviour> => {
+  const checkBehaviour = async (b: Behaviour): Promise<Behaviour | undefined> => {
+    if (droppedElements.has(b.entryPointId)) {
+      report(b.id, `entry point "${b.entryPointId}" was dropped`)
+      return undefined
+    }
     const steps: Step[] = []
     const droppedSteps = new Set<string>()
     for (const s of b.steps) {
@@ -146,11 +155,17 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
     return { ...b, elementIds: b.elementIds.filter(id => !droppedElements.has(id)), steps, errorFlows }
   }
   const behaviours = []
-  for (const b of model.behaviours) behaviours.push(await checkBehaviour(b))
+  for (const b of model.behaviours) {
+    const c = await checkBehaviour(b)
+    if (c) behaviours.push(c)
+  }
   let baseBehaviours: Behaviour[] | undefined
   if (model.baseBehaviours) {
     baseBehaviours = []
-    for (const b of model.baseBehaviours) baseBehaviours.push(await checkBehaviour(b))
+    for (const b of model.baseBehaviours) {
+      const c = await checkBehaviour(b)
+      if (c) baseBehaviours.push(c)
+    }
   }
 
   const out: BehaviourModel = { ...model, elements, seams, seamViews, intentMismatches, behaviours }

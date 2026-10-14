@@ -112,4 +112,33 @@ describe('verifyEvidence', () => {
     expect(seam.enablingPoint).toBeUndefined()
     expect(r.dropped.length).toBeGreaterThan(0)
   })
+
+  test('output still parses when the entry point Element is dropped', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'nope')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
+    const r = await verifyEvidence(m, async () => file20)
+    expect(r.model.behaviours.length).toBe(0)
+    expect(r.dropped.some(d => d.id === 'bh')).toBe(true)
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
+
+  test('drops a Seam view whose subject Element was dropped and still parses', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'nope')], [ev('x.ts', 10, 10, 'needle')])
+    m.seamViews = { b: { subjectId: 'b', status: 'built', nodes: [], edges: [] } }
+    const r = await verifyEvidence(m, async () => file20)
+    expect(Object.keys(r.model.seamViews).length).toBe(0)
+    expect(r.dropped.some(d => d.id === 'b')).toBe(true)
+    const parsed = parseBehaviourModel(JSON.stringify(r.model))
+    expect('model' in parsed).toBe(true)
+  })
+
+  test('drops a baseBehaviours entry whose entry point was dropped and still parses', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'nope')], [ev('x.ts', 10, 10, 'needle')])
+    const b = m.behaviours[0]!
+    m.behaviours = [{ ...b, entryPointId: 'a', elementIds: ['a'], steps: [] }]
+    m.baseBehaviours = [{ ...b, id: 'base', entryPointId: 'b', elementIds: ['b'], steps: [] }]
+    const r = await verifyEvidence(m, async () => file20)
+    expect(r.model.baseBehaviours?.length).toBe(0)
+    expect(r.dropped.some(d => d.id === 'base')).toBe(true)
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
 })
