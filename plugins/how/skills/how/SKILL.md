@@ -30,23 +30,24 @@ The Evidence check reads the files in this checkout, so the head being explained
 
 **Done when** `scope` is fully known: `mode`, `target`, `headSha`, and `baseSha` or `focus` where they apply.
 
-### The base worktree (PR mode)
-
-As soon as `baseSha` is known, create the one base worktree this run uses. LSP works on it as on any checkout, and every base read in later steps goes through it; the user's checkout keeps its branch, staged changes and files exactly as they are.
-
-```
-W="$TMPDIR/how-base-<baseSha first 12>"
-git worktree remove --force "$W" 2>/dev/null; git worktree prune
-git worktree add --detach "$W" <baseSha> && cd "$W" && pwd -P
-```
-
-Note the absolute path `pwd -P` prints: builders need it. **Every exit removes it** with `git worktree remove --force <path>`: the cache hit in step 2, any other early stop, an error at any step, and the end of step 9.
-
 ## 2. Check the cache
 
 When the model file exists, its `scope` equals the resolved one (`mode`, `target`, `baseSha`, `focus`), and `git status --porcelain --untracked-files=no` prints nothing, call `mcp__how__open` with `{ "modelPath": <model path> }`, report as in step 9, and stop. The panel settles any Behaviour left `building`.
 
 Otherwise build a new model; it replaces the file.
+
+### The base worktree (PR mode)
+
+Now create the one base worktree this run uses. LSP works on it as on any checkout, and every base read in later steps goes through it. Your shell stays in the user's checkout throughout: reach base with `git -C <worktree path> …` and absolute paths under it, and leave the user's branch, staged changes and files exactly as they are.
+
+```
+W="$TMPDIR/how-base-<baseSha first 12>"
+git worktree remove --force "$W" 2>/dev/null; git worktree prune
+git worktree add --detach "$W" <baseSha>
+(cd "$W" && pwd -P)
+```
+
+The subshell prints the worktree's absolute path: base builders get that path. **Every exit from here on removes the worktree** with `git worktree remove --force <path>`: an early stop, an error at any step, and the end of step 9.
 
 ## 3. Intent (PR mode)
 

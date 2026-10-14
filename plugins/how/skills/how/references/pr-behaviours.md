@@ -4,7 +4,7 @@ PR mode decomposes the change into Behaviours: every changed hunk lands either i
 
 ## 1. List the hunks
 
-Take the diff (`gh pr diff <n>`, or `git diff <baseSha>` for a range or branch). For each hunk, find its enclosing symbol with LSP `documentSymbol`: at head for added and changed lines, in the base worktree for hunks that only remove lines. Hunks with the same enclosing symbol share one walk: walk each symbol once.
+Take the diff (`gh pr diff <n>`, or `git diff <baseSha> HEAD` for a range or branch). For each hunk, find its enclosing symbol with LSP `documentSymbol`: at head for added and changed lines, in the base worktree for hunks that only remove lines. Hunks with the same enclosing symbol share one walk: walk each symbol once.
 
 ## 2. Walk each hunk out to its Entry points
 
