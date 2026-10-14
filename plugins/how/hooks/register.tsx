@@ -270,7 +270,7 @@ async function mergeBuild($: any, modelPath: string, fragmentPath: string, pendi
       await writeStatus($, pending.subject, 'failed')
       return { deny: `Could not read the fragment at ${fragmentPath}: ${errText(err)}; ${BUILD_FAILED}` }
     }
-    const merged = mergeFragment(parsed.model, fragmentText)
+    const merged = mergeFragment(parsed.model, fragmentText, pending.subject)
     const subject = pending.subject
     const key = subjectKey(subject)
     if (merged.subject && subjectKey(merged.subject) !== key) {

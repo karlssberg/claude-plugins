@@ -203,9 +203,10 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 /**
  * Merges a builder's fragment `{ behaviour?, seamView?, elements?, seams? }` into the model: the Behaviour replaces
  * the one of its id and the Seam view is set under its subject, each with status `built`; new Elements and Seams are
- * added and existing ids are never overwritten. The result is validated as a whole Behaviour model.
+ * added and existing ids are never overwritten. The result is validated as a whole Behaviour model. Given the
+ * `pending` subject, a fragment carrying both parts is refused when one of them builds another subject.
  */
-export function mergeFragment(model: BehaviourModel, fragmentJson: string): MergeResult {
+export function mergeFragment(model: BehaviourModel, fragmentJson: string, pending?: BuildSubject): MergeResult {
   let raw: unknown
   try {
     raw = JSON.parse(fragmentJson)
@@ -235,6 +236,17 @@ export function mergeFragment(model: BehaviourModel, fragmentJson: string): Merg
     next.seamViews = { ...model.seamViews, [subjectId]: built }
   }
   if (subject === undefined) return { error: 'fragment holds neither "behaviour" nor "seamView"' }
+  if (pending !== undefined && f.behaviour !== undefined && f.seamView !== undefined) {
+    const parts: [string, BuildSubject][] = [
+      ['behaviour', subject],
+      ['seamView', { kind: 'seam', subjectId: (f.seamView as { subjectId: string }).subjectId, behaviourId: '' }],
+    ]
+    const want = subjectKey(pending)
+    const extra = parts.find(([, s]) => subjectKey(s) !== want)
+    if (extra && parts.some(([, s]) => subjectKey(s) === want)) {
+      return { error: `fragment also carries a "${extra[0]}" for ${subjectKey(extra[1])}; it may build only ${want}`, subject: pending }
+    }
+  }
   for (const key of ['elements', 'seams'] as const) {
     const add = f[key]
     if (add === undefined) continue
