@@ -2,7 +2,7 @@
 import type { BehaviourModel } from '../model/behaviour-model'
 import { renderMap } from './behaviour-map'
 import { type ModelState, type Navigation, popTo, type ViewRef } from './navigation'
-import { truncate } from './text'
+import { truncate, wrap } from './text'
 
 const CRUMB_MAX = 24
 const BUTTON_PAD = 6
@@ -49,8 +49,10 @@ export async function renderPane(env: PaneEnv, e: unknown) {
   if (error !== undefined) {
     return (
       <Box flexDirection="column">
-        <Box key="model-error">
-          <Text color="red">{truncate(error, columns)}</Text>
+        <Box key="model-error" flexDirection="column">
+          {wrap(error, columns).map((l: string) => (
+            <Text color="red">{l}</Text>
+          ))}
         </Box>
         <Button key="reload" onPress={() => env.reload()}>
           Reload
@@ -67,13 +69,22 @@ export async function renderPane(env: PaneEnv, e: unknown) {
   }
 
   const current = nav.stack[nav.stack.length - 1] ?? { kind: 'map' as const }
+  const SEP = 3 // " > "
+  const n = nav.stack.length
+  const perFull = Math.floor((columns - SEP * (n - 1)) / n) - BUTTON_PAD
+  // Too narrow for every crumb: keep the first and last pressable, collapse the middle into one "…".
+  const collapsed = n > 2 && perFull < 4
+  const shownDepths = collapsed ? [0, n - 1] : nav.stack.map((_, d) => d)
+  const room = collapsed ? Math.floor((columns - SEP * 2 - 1) / 2) - BUTTON_PAD : perFull
+  const labelWidth = Math.max(1, Math.min(CRUMB_MAX, room))
   const crumbs = (
     <Box flexDirection="row">
-      {nav.stack.map((ref, depth) => (
+      {shownDepths.map((depth, i) => (
         <Box key={`crumb-box-${depth}`} flexDirection="row">
-          {depth > 0 && <Text dimColor> &gt; </Text>}
-          <Button key={`crumb-${depth}`} onPress={() => updateNav(n => popTo(n, depth))}>
-            {truncate(crumbLabel(ref, model), Math.max(4, Math.min(CRUMB_MAX, columns - BUTTON_PAD)))}
+          {i > 0 && collapsed && i === 1 && <Text dimColor> &gt; … &gt; </Text>}
+          {i > 0 && !collapsed && <Text dimColor> &gt; </Text>}
+          <Button key={`crumb-${depth}`} onPress={() => updateNav(nv => popTo(nv, depth))}>
+            {truncate(crumbLabel(nav.stack[depth]!, model), labelWidth)}
           </Button>
         </Box>
       ))}

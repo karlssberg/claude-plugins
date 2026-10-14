@@ -29,13 +29,26 @@ const seamsOf = (b: Behaviour, model: BehaviourModel): Seam[] =>
 
 const plain: NodeStyle = { diff: 'unchanged', isInferred: false, isGroup: false, isFaded: false }
 
-async function seamDiagram(shown: Behaviour[], model: BehaviourModel, maxCols: number) {
+export const DIAGRAM_NODE_BUDGET = 12
+export const SVG_MAX_CHARS = 131_072
+
+/**
+ * Seam diagram of the Behaviours in map order, each with its not-yet-drawn Seams, while drawn nodes stay within
+ * the node budget; a Behaviour that would exceed it is skipped and later ones are still tried.
+ */
+async function seamDiagram(ordered: Behaviour[], model: BehaviourModel, maxCols: number) {
   const nodes: { id: string; label: string; style: NodeStyle }[] = []
   const edges: { id: string; from: string; to: string; isError: boolean; isSeamCrossing: boolean }[] = []
   const seamIds = new Set<string>()
-  for (const b of shown) {
-    const seams = seamsOf(b, model)
+  let drawn = 0
+  let candidates = 0
+  for (const b of ordered) {
+    const seams = [...new Map(seamsOf(b, model).map(s => [s.id, s])).values()]
     if (seams.length === 0) continue
+    candidates++
+    const fresh = seams.filter(s => !seamIds.has(s.id))
+    if (nodes.length + 1 + fresh.length > DIAGRAM_NODE_BUDGET) continue
+    drawn++
     nodes.push({ id: `b:${b.id}`, label: b.name, style: plain })
     for (const s of seams) {
       if (!seamIds.has(s.id)) {
@@ -47,7 +60,11 @@ async function seamDiagram(shown: Behaviour[], model: BehaviourModel, maxCols: n
   }
   if (seamIds.size === 0) return undefined
   const layout = await layoutGraph({ nodes, edges }, { maxCols, direction: 'RIGHT' })
-  return { layout, behaviours: shown.length, seams: seamIds.size }
+  const source = toSvg(layout, CELL_PX)
+  if (source.length > SVG_MAX_CHARS) return undefined
+  const alt =
+    `Behaviour map: ${drawn} Behaviours, ${seamIds.size} Seams` + (drawn < candidates ? ` (top ${drawn} of ${candidates})` : '')
+  return { layout, source, alt }
 }
 
 /** The Behaviour map body (without breadcrumb). `ui` is the surface's element table; takes no `$` (see register.tsx). */
@@ -71,7 +88,7 @@ export async function renderMap(
     : wrap(model.intent.text ?? '', width)
   const sources = model.intent.sources.length > 0 ? wrap(`Sources: ${model.intent.sources.join(', ')}`, width) : []
 
-  const diagram = hasSvg ? await seamDiagram(shown, model, width) : undefined
+  const diagram = hasSvg ? await seamDiagram(ordered, model, width) : undefined
 
   return (
     <Box flexDirection="column">
@@ -120,8 +137,8 @@ export async function renderMap(
       )}
       {diagram && (
         <Svg
-          source={toSvg(diagram.layout, CELL_PX)}
-          alt={`Behaviour map: ${diagram.behaviours} Behaviours, ${diagram.seams} Seams`}
+          source={diagram.source}
+          alt={diagram.alt}
           width={diagram.layout.cols * CELL_PX.width}
           height={diagram.layout.rows * CELL_PX.height}
         />
