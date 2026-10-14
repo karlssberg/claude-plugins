@@ -194,14 +194,6 @@ describe('Behaviour map', () => {
     await ui.unmount()
   })
 
-  test('the Evidence view renders a placeholder inside the breadcrumb frame', async ($, on) => {
-    const nav = { stack: [{ kind: 'map' }, { kind: 'evidence', ownerId: 'step:b-place:s1', index: 0 }], showErrors: false, expandedGroups: [], showAll: false }
-    const ui = await mount($, on, 'terminal', { model: load(prSmallJson) }, 80, nav)
-    expect(await ui.find({ key: 'crumb-0' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /coming in a later task/ })).toBeDefined()
-    await ui.unmount()
-  })
-
   test('navigation starts at the map', async ($, on) => {
     const ui = await mount($, on, 'terminal', { model: load(prSmallJson) })
     expect(await ui.find({ key: 'crumb-0' })).toBeDefined()

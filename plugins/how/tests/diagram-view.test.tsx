@@ -301,6 +301,7 @@ const parentOf = (root: VNode, target: VNode): VNode | undefined =>
 
 describe('overlay mode', () => {
   const ui = { Box: 'Box', Text: 'Text', Button: 'Button', Svg: 'Svg' }
+  const opened: { owner: string; index: number }[] = []
   const envFor = (nav: Navigation, applied: Navigation[], built: unknown[] = []) => ({
     ui,
     state: {},
@@ -308,6 +309,8 @@ describe('overlay mode', () => {
     updateNav: async (fn: (n: Navigation) => Navigation) => applied.push(fn(nav)),
     reload: async () => {},
     requestBuild: async (subject: unknown) => built.push(subject),
+    snippets: {},
+    openEvidence: async (owner: string, index: number) => opened.push({ owner, index }),
   })
   const button = (tree: VNode, key: string) => walk(tree).find(n => n.type === 'Button' && n.props?.key === key) as any
 
@@ -336,7 +339,7 @@ describe('overlay mode', () => {
     const applied: Navigation[] = []
     const tree = (await renderDiagramView(envFor(nav, applied) as any, seam, load(prSmallJson), nav, 80, 'terminal')) as VNode
     await button(tree, 'node-n1').onPress()
-    expect(applied[0]!.stack[2]).toEqual({ kind: 'evidence', ownerId: 'flow:order-service:n1', index: 0 })
+    expect(opened.splice(0)).toEqual([{ owner: 'flow:order-service:n1', index: 0 }])
   })
 
   test('absolute node and seam-crossing Buttons sit at the layout cells over a Svg of the same size', async () => {

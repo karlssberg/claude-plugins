@@ -5,6 +5,7 @@ declare module 'claude-code' {
   interface PluginState {
     how: {
       model: { path?: string; model?: { [key: string]: unknown }; error?: string }
+      snippets: { [key: string]: { source: string; startLine: number } | { error: string } }
       nav: {
         stack: (
           | { kind: 'map' }

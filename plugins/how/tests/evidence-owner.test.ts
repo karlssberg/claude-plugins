@@ -56,4 +56,15 @@ describe('resolveEvidenceOwner', () => {
       expect(resolveEvidenceOwner(m, id)).toBeUndefined()
     }
   })
+
+  test('ids containing ":" resolve: an Element id under flow:, a Behaviour id under step:', () => {
+    const m = clone(load(prSmallJson))
+    m.seamViews['src/a.ts:Foo'] = { ...clone(m.seamViews['order-service']!), subjectId: 'src/a.ts:Foo' }
+    const flow = resolveEvidenceOwner(m, 'flow:src/a.ts:Foo:n1')
+    expect(flow?.label).toBe(m.seamViews['order-service']!.nodes[0]!.label)
+    m.behaviours[0]!.id = 'pkg:place'
+    const step = resolveEvidenceOwner(m, 'step:pkg:place:s1')
+    expect(step?.label).toBe('POST /orders')
+    expect(resolveEvidenceOwner(m, 'step:pkg:place:nope')).toBeUndefined()
+  })
 })

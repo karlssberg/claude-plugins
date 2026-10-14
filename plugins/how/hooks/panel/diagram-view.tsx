@@ -94,7 +94,7 @@ async function seamDiagram(env: PaneEnv, ref: Extract<ViewRef, { kind: 'seam' }>
     // A flow node is no element: it opens its own Evidence, when it has any.
     onPress:
       (flow.get(n.id)?.evidence.length ?? 0) > 0
-        ? () => env.updateNav(nv => push(nv, { kind: 'evidence', ownerId: ownerId.flow(ref.subjectId, n.id), index: 0 }))
+        ? () => env.openEvidence(ownerId.flow(ref.subjectId, n.id), 0)
         : undefined,
   }))
   const rows = layout.edges.map(edge => ({
@@ -167,7 +167,7 @@ export async function renderDiagramView(
     <Box key="evidence" flexDirection="column">
       {evidence.flatMap(o =>
         o.items.map((e, i) => (
-          <Button key={`evidence-${o.ownerId}-${i}`} onPress={() => env.updateNav(n => push(n, { kind: 'evidence', ownerId: o.ownerId, index: i }))}>
+          <Button key={`evidence-${o.ownerId}-${i}`} onPress={() => env.openEvidence(o.ownerId, i)}>
             {truncate(`${o.label}${evidenceRef(e)}`, width - BUTTON_PAD)}
           </Button>
         )),

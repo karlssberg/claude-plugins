@@ -2,6 +2,7 @@
 import type { BehaviourModel } from '../model/behaviour-model'
 import { renderMap } from './behaviour-map'
 import { renderDiagramView } from './diagram-view'
+import { renderEvidenceView, type Snippets } from './evidence-view'
 import { type ModelState, type Navigation, popTo, type ViewRef } from './navigation'
 import { BUTTON_PAD, truncate, wrap } from './text'
 
@@ -19,6 +20,12 @@ export type PaneEnv = {
   reload: () => Promise<unknown> // register.tsx's requestReload; a stub until Task 10
   /** Builds a pending or failed Behaviour or Seam view: register.tsx's requestBuild; a stub until Task 10. */
   requestBuild: (subject: Extract<ViewRef, { kind: 'behaviour' | 'seam' }>) => Promise<unknown>
+  /** Loads the Evidence's source snippet, then shows the Evidence view: register.tsx's openEvidence (uses `$.fs.read`). */
+  openEvidence: (ownerId: string, index: number) => Promise<unknown>
+  /** Loaded source snippets keyed `file:start-end`. */
+  snippets: Snippets
+  /** The session's working directory, absolute; undefined when unavailable (no editor link then). */
+  cwd?: string
 }
 
 export function crumbLabel(ref: ViewRef, model: BehaviourModel): string {
@@ -33,8 +40,6 @@ export function crumbLabel(ref: ViewRef, model: BehaviourModel): string {
       return 'Evidence'
   }
 }
-
-const EVIDENCE_PLACEHOLDER = 'Evidence — coming in a later task'
 
 export async function renderPane(env: PaneEnv, e: unknown) {
   const { ui, nav, updateNav } = env
@@ -93,7 +98,7 @@ export async function renderPane(env: PaneEnv, e: unknown) {
     current.kind === 'map' ? (
       await renderMap(ui, updateNav, model, nav, columns, surface)
     ) : current.kind === 'evidence' ? (
-      <Text dimColor>{truncate(EVIDENCE_PLACEHOLDER, columns)}</Text>
+      renderEvidenceView(env, current, model, env.snippets, columns, surface)
     ) : (
       await renderDiagramView(env, current, model, nav, columns, surface)
     )
