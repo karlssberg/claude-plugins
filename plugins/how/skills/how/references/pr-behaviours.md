@@ -4,11 +4,11 @@ PR mode decomposes the change into Behaviours: every changed hunk lands either i
 
 ## 1. List the hunks
 
-Take the diff (`gh pr diff <n>`, or `git diff <baseSha>` for a range or branch). For each hunk, find its enclosing symbol with LSP `documentSymbol`: at head for added and changed lines, in the base worktree for hunks that only remove lines.
+Take the diff (`gh pr diff <n>`, or `git diff <baseSha>` for a range or branch). For each hunk, find its enclosing symbol with LSP `documentSymbol`: at head for added and changed lines, in the base worktree for hunks that only remove lines. Hunks with the same enclosing symbol share one walk: walk each symbol once.
 
 ## 2. Walk each hunk out to its Entry points
 
-From the enclosing symbol, follow LSP `incomingCalls` caller by caller until you reach an Entry point inside the focus (the kinds are listed in [ranking.md](ranking.md)). Keep every distinct Entry point reached: a hunk in shared code belongs to every Behaviour whose Critical path passes through it.
+From the enclosing symbol, follow LSP `incomingCalls` caller by caller until you reach an Entry point inside the focus (the kinds are listed in [ranking.md](ranking.md)), for at most 8 hops. Keep every distinct Entry point reached: a hunk in shared code belongs to every Behaviour whose Critical path passes through it. A symbol with no Entry point within 8 callers makes its hunks Incidental changes with reason `other`.
 
 - A hunk that adds or changes an Entry point (a new route, a new command) is its own Entry point.
 - Where the call hierarchy stops at dependency injection, reflection or a message bus, find the binding, registration or publish site with Grep and continue from there. Record that hop as Inferred.
@@ -26,7 +26,7 @@ A hunk that reaches no Entry point is an Incidental change: `{ file, hunk, reaso
 - `docs`: documentation and comments only.
 - `config`: build, CI, lint, editor and dependency manifests that are no Enabling point.
 - `refactor`: a rename or move whose code reaches no Entry point, or one you can show leaves the Behaviour the same.
-- `other`: anything else, such as dead code.
+- `other`: anything else, such as dead code, or code with no Entry point within 8 callers.
 
 A hunk that reaches an Entry point is never Incidental, however small.
 
@@ -42,7 +42,7 @@ Order the Behaviours by risk: every `contract-change` Behaviour first, then `err
 
 ## 6. Base comparison
 
-A built head Behaviour is matched to its base by its Entry point Element's `name`, and its Steps by from/to Element names and label. So a base builder gets the head Behaviour and reuses its Element ids, names and Step labels word for word wherever the base code is the same; only then do unchanged Steps pair up as unchanged.
+A built head Behaviour is matched to its base by its Entry point Element's `name`, and its Steps by from/to Element names and label. So a base builder gets the head Behaviour and its hunks, re-traces at base only the Steps whose Evidence overlaps a hunk, and copies every other Step verbatim (ids, Element ids, labels, Evidence); only then do unchanged Steps pair up as unchanged.
 
 - An Entry point added by the PR has no base: build no base Behaviour for it, and its Steps show as added.
 - Elements that exist only at base get ids prefixed `base-` and join `elements`, so the removed Steps in `baseBehaviours` resolve.

@@ -23,13 +23,13 @@ Every Entry point you keep has Evidence: the registration or definition line. Co
 Compute four signals per Entry point. Floor each of the first three at 1 so one zero cannot erase the rest.
 
 - `reach`: the number of distinct repo Elements (functions, classes, modules) reachable from the Entry point through LSP `outgoingCalls`, to depth 4. Each external system it calls counts once.
-- `fanIn`: the number of distinct referencing locations (LSP `findReferences`) of the Elements it reaches. High `fanIn` means it runs through load-bearing code.
+- `fanIn`: the number of distinct referencing locations (LSP `findReferences`) of the Entry point's direct callees, taking at most 20 callees. High `fanIn` means it runs through load-bearing code.
 - `hotspot`: for each file holding a reached Element, its churn times its line count, summed. Churn is the added plus deleted lines from `git log --since=12.months --format= --numstat -- <file>`; line count is `wc -l <file>`.
 - `seamBoost`: `1.5` when the Behaviour crosses a `network` or `message` Seam (an HTTP client call, a queue publish, a database driver call), otherwise `1`.
 
 `score = reach × fanIn × hotspot × seamBoost`. Store `rank: { score, signals: { reach, fanIn, hotspot, seamBoost } }`.
 
-With more than 30 Entry points, compute `hotspot` for all of them first and score only the 30 highest; the rest get `pending` with `rank.score: 0` and the signals you have.
+With more than 15 Entry points, compute `hotspot` for all of them first and score only the 15 highest; the rest get `pending` with `rank.score: 0` and the signals you have.
 
 ## 3. Order
 
