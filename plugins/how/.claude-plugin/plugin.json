@@ -1,0 +1,7 @@
+{
+  "name": "how",
+  "description": "Diagram-first explorer of Behaviours, Seams and error flows for PRs and codebases",
+  "version": "0.1.0",
+  "types": "./types/state.d.ts",
+  "author": { "name": "karlssberg" }
+}
