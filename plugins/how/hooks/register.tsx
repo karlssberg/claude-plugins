@@ -3,7 +3,8 @@ import type { Register } from 'claude-code'
 import { initialNavigation, type ModelState, type Navigation, push } from './panel/navigation'
 import { renderPane } from './panel/pane'
 import { resolveEvidenceOwner } from './panel/evidence-owner'
-import { type Snippets, sliceSnippet, snippetKey } from './panel/evidence-view'
+import { containedPath } from './model/paths'
+import { MAX_SNIPPETS, type Snippets, sliceSnippet, snippetKey } from './panel/evidence-view'
 
 export const PANE_ID = 'how'
 
@@ -25,12 +26,26 @@ export async function openEvidence($: any, ownerId: string, index: number): Prom
   if (item) {
     const key = snippetKey(item)
     let value: Snippets[string]
+    let cwd: string | undefined
     try {
-      value = sliceSnippet(String(await $.fs.read(item.file)), item.startLine, item.endLine)
-    } catch (err) {
-      value = { error: err instanceof Error ? err.message : String(err) }
+      cwd = await $.session.cwd()
+    } catch {
+      cwd = undefined
     }
-    await update($, snippetsState, (s: Snippets) => ({ ...s, [key]: value }))
+    const rel = containedPath(item.file, cwd)
+    if (rel === undefined) {
+      value = { error: `path outside the repository: ${item.file}` }
+    } else {
+      try {
+        value = sliceSnippet(String(await $.fs.read(rel)), item.startLine, item.endLine, item.file)
+      } catch (err) {
+        value = { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    await update($, snippetsState, (s: Snippets) => {
+      const { [key]: _old, ...rest } = s
+      return Object.fromEntries(Object.entries({ ...rest, [key]: value }).slice(-MAX_SNIPPETS))
+    })
   }
   await update($, navState, (nv: Navigation) => {
     const top = nv.stack[nv.stack.length - 1]
