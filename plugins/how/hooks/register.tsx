@@ -348,8 +348,17 @@ export const register: Register = on => {
           isDeferred: false,
         }),
       ])
-    } catch {
-      // registration refused: the panel still draws
+    } catch (err) {
+      // Refused registration (e.g. a sandbox that forbids the local port tools are served on): the panel still
+      // draws, but mcp__how__open does not exist, so say why instead of failing silently.
+      // A refusal may come prefixed "<plugin>: $.tool.register: "; the toast already names the plugin.
+      const reason = errText(err).replace(/^[\w-]+: \$\.tool\.register: /, '')
+      await logLine($, `how: could not register mcp__how__open and mcp__how__refresh: ${reason}`)
+      try {
+        $.ui.toast(`how: tools unavailable — ${reason}`)
+      } catch {
+        // no surface for toasts: the log line stands
+      }
     }
     return next(e)
   })

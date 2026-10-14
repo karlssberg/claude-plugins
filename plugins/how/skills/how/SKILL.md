@@ -121,4 +121,6 @@ Set the stated claims against the observed Behaviour changes and record each Int
 
 Write the whole model as one JSON object to the model path, with `version: 1` and every Evidence `status: "unchecked"` (or `"inferred"` for a link you reasoned rather than read). Call `mcp__how__open` with `{ "modelPath": <absolute model path> }`. When it answers an error, fix the file and call it again, at most twice; if it still fails, set the Behaviour the error names to `status: "failed"` with its skeleton and Entry point Evidence, and open once more.
 
+When `mcp__how__open` is not in your tools at all, the how plugin could not register its tools (most often a sandbox that forbids binding a local port; the plugin logs the reason as "how: tools unavailable — …"). Tell the user so in one line, give the absolute model path you wrote, and say that `/how` with the same arguments opens it from the cache once the tools are available (for a sandbox, `sandbox.network.allowLocalBinding: true`).
+
 The tool answers `<n> Behaviours, <d> elements dropped: …`. Reply to the user in at most 3 lines: the mode (and target), the Behaviour count, the dropped-element summary as the tool gave it, and that the how panel is open.

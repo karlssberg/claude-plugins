@@ -263,4 +263,22 @@ describe('mcp__how__refresh', () => {
     }
     expect(specs.find(s => s.name === 'refresh').inputSchema.properties.fragmentPath).toBeDefined()
   })
+
+  test('a refused tool registration is logged and toasted, not swallowed', async ($, on) => {
+    const logs: string[] = []
+    const toasts: string[] = []
+    world(on)
+    on('tool.register', async () => ({ deny: 'Failed to start server. Is port 0 in use?' }) as any)
+    on('ui.log', async (_$, e) => {
+      logs.push((e as { text: string }).text)
+      return { value: undefined } as any
+    })
+    on('ui.toast', async (_$, e) => {
+      toasts.push((e as { text: string }).text)
+      return { value: undefined } as any
+    })
+    await $.session.start({ cwd: CWD, surface: null, isInteractive: false })
+    expect(toasts).toEqual(['how: tools unavailable — Failed to start server. Is port 0 in use?'])
+    expect(logs.some(l => l.includes('Failed to start server. Is port 0 in use?'))).toBe(true)
+  })
 })
