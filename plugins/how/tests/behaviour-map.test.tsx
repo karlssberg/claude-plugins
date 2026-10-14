@@ -195,7 +195,7 @@ describe('Behaviour map', () => {
   })
 
   test('the Evidence view renders a placeholder inside the breadcrumb frame', async ($, on) => {
-    const nav = { stack: [{ kind: 'map' }, { kind: 'evidence', ownerId: 's1', index: 0 }], showErrors: false, expandedGroups: [], showAll: false }
+    const nav = { stack: [{ kind: 'map' }, { kind: 'evidence', ownerId: 'step:b-place:s1', index: 0 }], showErrors: false, expandedGroups: [], showAll: false }
     const ui = await mount($, on, 'terminal', { model: load(prSmallJson) }, 80, nav)
     expect(await ui.find({ key: 'crumb-0' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /coming in a later task/ })).toBeDefined()
@@ -248,7 +248,7 @@ describe('Behaviour map', () => {
         { kind: 'map' },
         { kind: 'behaviour', behaviourId: 'b-place' },
         { kind: 'seam', subjectId: 'seam-inventory', behaviourId: 'b-place' },
-        { kind: 'evidence', ownerId: 'seam-inventory', index: 0 },
+        { kind: 'evidence', ownerId: 'seam:seam-inventory', index: 0 },
       ],
       showErrors: false,
       expandedGroups: [],

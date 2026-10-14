@@ -1,9 +1,7 @@
 // Text rendering of a Behaviour or Seam view for surfaces without Svg (the terminal): one Button per node, one
 // line per row, Seam crossings pressable.
 import type { Diagram } from './diagram-view'
-import { truncate } from './text'
-
-const BUTTON_PAD = 6
+import { BUTTON_PAD, truncate } from './text'
 
 const colorOf = (diff: string, isError: boolean) =>
   isError ? 'red' : diff === 'added' ? 'green' : diff === 'changed' ? 'yellow' : undefined
@@ -13,11 +11,17 @@ export function renderDiagramText(ui: any, d: Diagram, width: number) {
   return (
     <Box flexDirection="column">
       <Box key="nodes" flexDirection="column">
-        {d.nodes.map(n => (
-          <Button key={`node-${n.id}`} onPress={n.onPress}>
-            {truncate(n.text, width - BUTTON_PAD)}
-          </Button>
-        ))}
+        {d.nodes.map(n =>
+          n.onPress ? (
+            <Button key={`node-${n.id}`} onPress={n.onPress}>
+              {truncate(n.text, width - BUTTON_PAD)}
+            </Button>
+          ) : (
+            <Box key={`node-text-${n.id}`}>
+              <Text>{truncate(n.text, width)}</Text>
+            </Box>
+          ),
+        )}
       </Box>
       <Text> </Text>
       <Box key="rows" flexDirection="column">

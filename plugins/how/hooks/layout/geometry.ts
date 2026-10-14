@@ -16,7 +16,8 @@ export type NodeStyle = {
   isError?: boolean
   isSwallowed?: boolean
 }
-export type LayoutNode = { id: string; label: string; rect: CellRect; style: NodeStyle }
+// `label` is fitted to the rect; `title`, when set, is the full untruncated label (a group's is `<name> (n)`).
+export type LayoutNode = { id: string; label: string; title?: string; rect: CellRect; style: NodeStyle }
 export type LayoutEdge = {
   id: string
   from: string

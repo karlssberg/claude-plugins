@@ -3,6 +3,9 @@ import { truncate } from '../layout/sequence-layout'
 
 export { truncate }
 
+// Room taken by the engine's Button decoration ("[ ] " / hotkey) when a label is drawn.
+export const BUTTON_PAD = 6
+
 /** Word-wraps to `width` cells; words longer than the width are cut with an ellipsis. */
 export function wrap(text: string, width: number): string[] {
   const w = Math.max(1, width)

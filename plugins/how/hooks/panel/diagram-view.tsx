@@ -9,15 +9,15 @@ import { SVG_MAX_CHARS } from './behaviour-map'
 import { renderDiagramText } from './diagram-text'
 import { type Navigation, push, toggleErrors, toggleGroup, type ViewRef } from './navigation'
 import type { PaneEnv } from './pane'
-import { truncate, wrap } from './text'
+import { errorFlowEvidence, ownerId } from './evidence-owner'
+import { BUTTON_PAD, truncate, wrap } from './text'
 
 export type DiagramRef = Extract<ViewRef, { kind: 'behaviour' | 'seam' }>
-export type DiagramNode = { id: string; text: string; layout: LayoutNode; onPress: () => unknown }
+/** A node without `onPress` (a Seam-view flow node with no Evidence) is drawn as plain text. */
+export type DiagramNode = { id: string; text: string; layout: LayoutNode; onPress?: () => unknown }
 export type DiagramRow = { id: string; line: string; isError: boolean; edge: LayoutEdge; onPress?: () => unknown }
 export type Diagram = { layout: Layout; nodes: DiagramNode[]; rows: DiagramRow[]; alt: string }
 
-// Room taken by the engine's Button decoration ("[ ] " / hotkey) when a label is drawn.
-export const BUTTON_PAD = 6
 
 const diffTag = (d: DiffStatus) => (d === 'unchanged' ? '' : ` [${d}]`)
 
@@ -33,10 +33,6 @@ export function rowLine(r: { from: string; to: string; label: string; edge: Layo
 
 const evidenceRef = (e: Evidence) => `${e.file}:${e.startLine}${e.endLine !== e.startLine ? `-${e.endLine}` : ''}`
 
-function groupName(id: string, model: BehaviourModel, fallback: string): string {
-  if (id.startsWith('group:other')) return 'Other'
-  return model.elements[id.slice('group:'.length)]?.name ?? fallback
-}
 
 function behaviourDiagram(env: PaneEnv, b: Behaviour, model: BehaviourModel, nav: Navigation, width: number): Diagram {
   const layout = layoutBehaviourView(b, model, { maxCols: width, showErrors: nav.showErrors, expandedGroups: nav.expandedGroups })
@@ -44,12 +40,13 @@ function behaviourDiagram(env: PaneEnv, b: Behaviour, model: BehaviourModel, nav
   const byId = new Map(layout.nodes.map(n => [n.id, n]))
   const nameOf = (id: string) => {
     const n = byId.get(id)
-    const base = n?.style.isGroup ? groupName(id, model, n.label) : (model.elements[id]?.name ?? n?.label ?? id)
+    // A group's title is the fold's `<name> (n)`.
+    const base = n?.style.isGroup ? (n.title ?? n.label) : (model.elements[id]?.name ?? n?.label ?? id)
     return n?.style.isInferred ? `${base} (inferred)` : base
   }
   const nodes = layout.nodes.map(n => ({
     id: n.id,
-    text: n.style.isGroup ? `+ ${nameOf(n.id)} (group)` : `${nameOf(n.id)}${diffTag(n.style.diff)}`,
+    text: n.style.isGroup ? `+ ${nameOf(n.id)}` : `${nameOf(n.id)}${diffTag(n.style.diff)}`,
     layout: n,
     onPress: n.style.isGroup
       ? () => env.updateNav(nv => toggleGroup(nv, n.id))
@@ -94,9 +91,11 @@ async function seamDiagram(env: PaneEnv, ref: Extract<ViewRef, { kind: 'seam' }>
     id: n.id,
     text: `${nameOf(n.id)}${diffTag(n.style.diff)}`,
     layout: n,
-    // A flow node is no element: it opens its own Evidence.
-    onPress: () =>
-      (flow.get(n.id)?.evidence.length ?? 0) > 0 ? env.updateNav(nv => push(nv, { kind: 'evidence', ownerId: n.id, index: 0 })) : undefined,
+    // A flow node is no element: it opens its own Evidence, when it has any.
+    onPress:
+      (flow.get(n.id)?.evidence.length ?? 0) > 0
+        ? () => env.updateNav(nv => push(nv, { kind: 'evidence', ownerId: ownerId.flow(ref.subjectId, n.id), index: 0 }))
+        : undefined,
   }))
   const rows = layout.edges.map(edge => ({
     id: edge.id,
@@ -147,12 +146,21 @@ export async function renderDiagramView(
           : lines(element ? `${element.name} (${element.level})` : `Unknown subject ${ref.subjectId}`)}
       </Box>
     )
-    const items = seam ? seam.contract.evidence : (element?.evidence ?? [])
-    evidence = [{ ownerId: ref.subjectId, label: '', items }]
+    evidence = seam
+      ? [{ ownerId: ownerId.seam(seam.id), label: '', items: seam.contract.evidence }]
+      : [{ ownerId: ownerId.element(ref.subjectId), label: '', items: element?.evidence ?? [] }]
     status = model.seamViews[ref.subjectId]?.status ?? (seam || element ? 'pending' : 'missing')
   } else {
     status = behaviour ? behaviour.status : 'missing'
-    evidence = (behaviour?.steps ?? []).map(s => ({ ownerId: s.id, label: `${s.label}: `, items: s.evidence }))
+    const id = ref.behaviourId
+    evidence = [
+      ...(behaviour?.steps ?? []).map(s => ({ ownerId: ownerId.step(id, s.id), label: `${s.label}: `, items: s.evidence })),
+      ...(behaviour?.errorFlows ?? []).map(f => ({
+        ownerId: ownerId.error(id, f.id),
+        label: `⚠ ${f.transforms.map(t => t.into).join(' → ') || f.id}: `,
+        items: errorFlowEvidence(f),
+      })),
+    ]
   }
 
   const evidenceList = (
@@ -223,7 +231,7 @@ export async function renderDiagramView(
       </Box>
       {collapsible.map(g => (
         <Button key={`collapse-${g.id}`} onPress={() => env.updateNav(n => toggleGroup(n, g.id))}>
-          {truncate(`- ${groupName(g.id, model, g.label)} (group)`, width - BUTTON_PAD)}
+          {truncate(`- ${g.title ?? g.label}`, width - BUTTON_PAD)}
         </Button>
       ))}
     </Box>
@@ -282,9 +290,13 @@ function renderDesktop(ui: any, d: Diagram, source: string, mode: 'overlay' | 'l
           {svg}
           {d.nodes.map(n => (
             <Box key={`at-node-${n.id}`} position="absolute" left={n.layout.rect.col} top={n.layout.rect.row}>
-              <Button key={`node-${n.id}`} onPress={n.onPress}>
-                {truncate(n.layout.label, Math.max(1, n.layout.rect.cols))}
-              </Button>
+              {n.onPress ? (
+                <Button key={`node-${n.id}`} onPress={n.onPress}>
+                  {truncate(n.layout.label, Math.max(1, n.layout.rect.cols))}
+                </Button>
+              ) : (
+                <Text>{truncate(n.layout.label, Math.max(1, n.layout.rect.cols))}</Text>
+              )}
             </Box>
           ))}
           {crossings.map(r => {
@@ -306,11 +318,17 @@ function renderDesktop(ui: any, d: Diagram, source: string, mode: 'overlay' | 'l
   return (
     <Box flexDirection="column">
       {svg}
-      {d.nodes.map((n, i) => (
-        <Button key={`node-${n.id}`} onPress={n.onPress}>
-          {truncate(`${i + 1}. ${n.text}`, width - BUTTON_PAD)}
-        </Button>
-      ))}
+      {d.nodes.map((n, i) =>
+        n.onPress ? (
+          <Button key={`node-${n.id}`} onPress={n.onPress}>
+            {truncate(`${i + 1}. ${n.text}`, width - BUTTON_PAD)}
+          </Button>
+        ) : (
+          <Box key={`node-text-${n.id}`}>
+            <Text>{truncate(`${i + 1}. ${n.text}`, width)}</Text>
+          </Box>
+        ),
+      )}
       {crossings.map((r, k) => (
         <Button key={`edge-${r.id}`} onPress={r.onPress}>
           {truncate(`${d.nodes.length + k + 1}. ${r.line}`, width - BUTTON_PAD)}

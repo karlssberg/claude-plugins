@@ -4,13 +4,11 @@ import { layoutGraph } from '../layout/graph-layout'
 import { toSvg } from '../layout/svg'
 import type { Behaviour, BehaviourModel, Seam } from '../model/behaviour-model'
 import { type Navigation, push, showAllBehaviours, toggleGroup } from './navigation'
-import { truncate, wrap } from './text'
+import { BUTTON_PAD, truncate, wrap } from './text'
 
 export const MAP_LIMIT = 7
 export const INCIDENTAL_GROUP = 'incidental'
 const RISK_ORDER: Behaviour['risks'] = ['contract-change', 'error-handling-change', 'high-fan-in']
-// Room taken by the engine's Button decoration ("[ ] " / hotkey) when a label is drawn.
-const BUTTON_PAD = 6
 
 const riskRank = (r: Behaviour['risks'][number]) => RISK_ORDER.indexOf(r)
 const sortedRisks = (b: Behaviour) => [...b.risks].sort((a, c) => riskRank(a) - riskRank(c))

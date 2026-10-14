@@ -3,10 +3,9 @@ import type { BehaviourModel } from '../model/behaviour-model'
 import { renderMap } from './behaviour-map'
 import { renderDiagramView } from './diagram-view'
 import { type ModelState, type Navigation, popTo, type ViewRef } from './navigation'
-import { truncate, wrap } from './text'
+import { BUTTON_PAD, truncate, wrap } from './text'
 
 const CRUMB_MAX = 24
-const BUTTON_PAD = 6
 
 /**
  * What the panel layer gets from the Pane render hook in register.tsx. It carries closures instead of `$`

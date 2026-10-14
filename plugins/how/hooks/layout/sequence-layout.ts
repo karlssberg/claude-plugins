@@ -159,6 +159,7 @@ export function layoutBehaviourView(b: Behaviour, model: BehaviourModel, opts: L
     const full = group ? group.label : (model.elements[id]?.name ?? id)
     return {
       id,
+      title: full,
       label: truncate(full, colWidth - HEADER.gap <= 4 ? colWidth - HEADER.gap : colWidth - HEADER.gap - 2),
       rect: { col: i * colWidth, row: HEADER.top, cols: colWidth - HEADER.gap, rows: HEADER.rows },
       style,

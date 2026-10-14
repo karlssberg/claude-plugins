@@ -143,12 +143,15 @@ describe('Behaviour view and Seam view', () => {
       expect(nodes.length).toBeLessThanOrEqual(12)
       const groups = nodes.filter(k => k.startsWith('node-group:'))
       expect(groups.length).toBeGreaterThan(0)
+      // Each group names its member count, as the fold labels it.
+      expect((await ui.find({ key: 'node-group:pkg-b' }))?.text).toContain('+ PKG-B (10)')
+      expect((await ui.find({ key: 'node-group:pkg-c' }))?.text).toContain('+ PKG-C (10)')
       await ui.press({ key: groups[0]! })
       const after = await keysWith(ui, 'node-')
       expect(after).not.toContain(groups[0])
       expect(after.length).toBeGreaterThan(nodes.length)
       const collapse = `collapse-${groups[0]!.slice('node-'.length)}`
-      expect(await ui.find({ key: collapse })).toBeDefined()
+      expect((await ui.find({ key: collapse }))?.text).toMatch(/PKG-[BC] \(10\)/)
       await ui.press({ key: collapse })
       expect(await keysWith(ui, 'node-')).toEqual(nodes)
       await ui.unmount()
@@ -220,13 +223,20 @@ describe('Behaviour view and Seam view', () => {
 
     test(`evidence buttons push the Evidence view (${surface})`, async ($, on) => {
       const ui = await mount($, on, surface, load(prSmallJson), behaviourPath())
-      expect(await ui.find({ key: 'evidence-s3-0' })).toBeDefined()
-      await ui.press({ key: 'evidence-s3-0' })
+      expect(await ui.find({ key: 'evidence-s3-0' })).toBeUndefined()
+      expect(await ui.find({ key: 'evidence-step:b-place:s3-0' })).toBeDefined()
+      // ErrorFlow Evidence (transform, then handler) is reachable too.
+      expect(await ui.find({ key: 'evidence-error:b-place:ef1-0' })).toBeDefined()
+      expect(await ui.find({ key: 'evidence-error:b-place:ef1-1' })).toBeDefined()
+      await ui.press({ key: 'evidence-step:b-place:s3-0' })
       expect((await ui.find({ key: 'crumb-2' }))?.text).toContain('Evidence')
       await ui.unmount()
       const ui2 = await mount($, undefined, surface, load(prSmallJson), SEAM_PATH['seam-inventory']!)
-      expect(await ui2.find({ key: 'evidence-seam-inventory-0' })).toBeDefined()
+      expect(await ui2.find({ key: 'evidence-seam:seam-inventory-0' })).toBeDefined()
       await ui2.unmount()
+      const ui3 = await mount($, undefined, surface, load(prSmallJson), SEAM_PATH['order-service']!)
+      expect(await ui3.find({ key: 'evidence-element:order-service-0' })).toBeDefined()
+      await ui3.unmount()
     })
 
     test(`seam view of a built element lists its flow rows (${surface})`, async ($, on) => {
@@ -235,6 +245,16 @@ describe('Behaviour view and Seam view', () => {
       await ui.press({ key: 'toggle-errors' })
       expect(await keysWith(ui, 'node-')).toContain('node-n3')
       if (surface === 'terminal') expect(await ui.find({ type: 'Text', text: /⚠ stock available\? → OutOfStockError : no \[added\]/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test(`seam view node without Evidence is plain text, not a Button (${surface})`, async ($, on) => {
+      const m = clone(load(prSmallJson))
+      m.seamViews['order-service']!.nodes[3]!.evidence = []
+      const ui = await mount($, on, surface, m, SEAM_PATH['order-service']!)
+      expect(await keysWith(ui, 'node-')).toEqual(['node-n1', 'node-n2'])
+      expect(await ui.find({ key: 'node-n4' })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /order saved/ })).toBeDefined()
       await ui.unmount()
     })
   }
@@ -281,13 +301,42 @@ const parentOf = (root: VNode, target: VNode): VNode | undefined =>
 
 describe('overlay mode', () => {
   const ui = { Box: 'Box', Text: 'Text', Button: 'Button', Svg: 'Svg' }
-  const envFor = (nav: Navigation, applied: Navigation[]) => ({
+  const envFor = (nav: Navigation, applied: Navigation[], built: unknown[] = []) => ({
     ui,
     state: {},
     nav,
     updateNav: async (fn: (n: Navigation) => Navigation) => applied.push(fn(nav)),
     reload: async () => {},
-    requestBuild: async () => {},
+    requestBuild: async (subject: unknown) => built.push(subject),
+  })
+  const button = (tree: VNode, key: string) => walk(tree).find(n => n.type === 'Button' && n.props?.key === key) as any
+
+  test('build and retry Buttons call requestBuild with their subject', async () => {
+    const m = clone(load(prSmallJson))
+    m.behaviours[0]!.status = 'pending'
+    m.seamViews['order-service']!.status = 'failed'
+    const behaviour = { kind: 'behaviour' as const, behaviourId: 'b-place' }
+    const seam = { kind: 'seam' as const, subjectId: 'order-service', behaviourId: 'b-place' }
+    const nav: Navigation = { ...initialNavigation(), stack: [{ kind: 'map' }, behaviour] }
+    const built: unknown[] = []
+    const env = envFor(nav, [], built) as any
+    for (const surface of ['terminal', 'desktop']) {
+      await button((await renderDiagramView(env, behaviour, m, nav, 80, surface)) as VNode, 'build').onPress()
+      await button((await renderDiagramView(env, seam, m, nav, 80, surface)) as VNode, 'retry').onPress()
+      // A Seam with no Seam view yet is pending: build.
+      const fresh = { kind: 'seam' as const, subjectId: 'seam-inventory', behaviourId: 'b-place' }
+      await button((await renderDiagramView(env, fresh, m, nav, 80, surface)) as VNode, 'build').onPress()
+      expect(built.splice(0)).toEqual([behaviour, seam, fresh])
+    }
+  })
+
+  test('a Seam view flow node press opens its Evidence by a qualified owner id', async () => {
+    const seam = { kind: 'seam' as const, subjectId: 'order-service', behaviourId: 'b-place' }
+    const nav: Navigation = { ...initialNavigation(), stack: [{ kind: 'map' }, seam] }
+    const applied: Navigation[] = []
+    const tree = (await renderDiagramView(envFor(nav, applied) as any, seam, load(prSmallJson), nav, 80, 'terminal')) as VNode
+    await button(tree, 'node-n1').onPress()
+    expect(applied[0]!.stack[2]).toEqual({ kind: 'evidence', ownerId: 'flow:order-service:n1', index: 0 })
   })
 
   test('absolute node and seam-crossing Buttons sit at the layout cells over a Svg of the same size', async () => {
