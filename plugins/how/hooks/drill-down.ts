@@ -182,7 +182,16 @@ export type BuilderPromptInput = {
   subject: BuildSubject
   name: string
   fragmentPath: string
-  referencePath: string
+  /** The reference doc's absolute path; left out when the plugin root is unknown. */
+  referencePath?: string
+}
+
+const MAX_DESCRIPTION = 80
+
+/** The spawn's `description`: `how: build <name>`, control characters removed, at most 80 characters. */
+export function spawnDescription(name: string): string {
+  const text = `how: build ${name.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim()}`
+  return text.length <= MAX_DESCRIPTION ? text : `${text.slice(0, MAX_DESCRIPTION - 1)}…`
 }
 
 /** The `how:behaviour-builder` task: build one subject, write only the fragment, then call `mcp__how__refresh`. */
@@ -190,18 +199,18 @@ export function builderPrompt(p: BuilderPromptInput): string {
   const { subject: s } = p
   const what =
     s.kind === 'behaviour'
-      ? `the Behaviour "${p.name}" (id "${s.behaviourId}")`
-      : `the Seam view of "${p.name}" (subjectId "${s.subjectId}", reached from Behaviour "${s.behaviourId}")`
+      ? `the Behaviour ${JSON.stringify(p.name)} (id ${JSON.stringify(s.behaviourId)})`
+      : `the Seam view of ${JSON.stringify(p.name)} (subjectId ${JSON.stringify(s.subjectId)}, reached from Behaviour ${JSON.stringify(s.behaviourId)})`
   const shape =
     s.kind === 'behaviour'
-      ? `"behaviour": the complete Behaviour with id "${s.behaviourId}" (keep its id, name, entryPointId and rank) with its steps, errorFlows, elementIds and seamIds filled in`
-      : `"seamView": the SeamView with subjectId "${s.subjectId}", its nodes and edges filled in`
+      ? `"behaviour": the complete Behaviour with id ${JSON.stringify(s.behaviourId)} (keep its id, name, entryPointId and rank) with its steps, errorFlows, elementIds and seamIds filled in`
+      : `"seamView": the SeamView with subjectId ${JSON.stringify(s.subjectId)}, its nodes and edges filled in`
   const refresh = JSON.stringify({ modelPath: p.modelPath, fragmentPath: p.fragmentPath })
   return [
     `Build ${what} for the Behaviour model at ${p.modelPath}.`,
     '',
     `Subject: ${JSON.stringify(s)}`,
-    `Behaviour model format (read it first and follow it exactly): ${p.referencePath}`,
+    ...(p.referencePath === undefined ? [] : [`Behaviour model format (read it first and follow it exactly): ${p.referencePath}`]),
     `Read the Behaviour model for context (its scope, Elements, Seams and the subject's current entry); never edit it.`,
     '',
     `Write ONLY this fragment file, and no other file: ${p.fragmentPath}`,

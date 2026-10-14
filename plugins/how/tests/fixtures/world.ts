@@ -43,6 +43,8 @@ export type World = {
   writes: { path: string; text: string }[]
   opened: unknown[]
   spawns: { prompt: string; description?: string; subagentType?: string }[]
+  /** Reads of these files wait on the promise (a slow disk). */
+  holds: Record<string, Promise<void>>
   /** What each spawn answers, in order; the last repeats. */
   spawnAnswers: ({ agentId: string } | { deny: string })[]
 }
@@ -59,6 +61,7 @@ export function world(on: On, init: Partial<World> = {}): World {
     writes: [],
     opened: [],
     spawns: [],
+    holds: {},
     spawnAnswers: [{ agentId: 'agent-1' }],
     ...init,
   }
@@ -66,6 +69,7 @@ export function world(on: On, init: Partial<World> = {}): World {
     const path = String((e as { path: string }).path)
     w.reads.push(path)
     const f = fileOf(w, path)
+    if (f !== undefined && w.holds[f]) await w.holds[f]
     return f === undefined ? { deny: `ENOENT: ${path}` } : { value: w.files[f]! }
   })
   on('fs.write', async (_$, e) => {

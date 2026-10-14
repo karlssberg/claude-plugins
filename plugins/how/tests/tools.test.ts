@@ -12,12 +12,7 @@ import { initialNavigation } from '../hooks/panel/navigation'
 import { prSmallJson } from './fixtures/models'
 import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, written } from './fixtures/world'
 
-/** prSmall with the external Client cited too, so a clean load drops nothing. */
-function model(): BehaviourModel {
-  const m = clone(load(prSmallJson))
-  m.elements.client!.evidence = [{ file: 'src/client.ts', startLine: 1, endLine: 2, symbol: 'Client', status: 'unchecked' }]
-  return m
-}
+const model = (): BehaviourModel => clone(load(prSmallJson))
 const filesOf = (m: BehaviourModel): Record<string, string> => ({ ...sourcesFor(m), [MODEL_PATH]: JSON.stringify(m) })
 
 describe('model paths', () => {

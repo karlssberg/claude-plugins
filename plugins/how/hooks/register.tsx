@@ -21,6 +21,7 @@ import {
   type PendingBuilds,
   resolvableStack,
   settleOrphanBuilds,
+  spawnDescription,
   subjectKey,
   subjectName,
   withBuildStatus,
@@ -96,6 +97,16 @@ const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
   return run
 }
 const buildTimers = new Map<string, { cancel: () => void }>()
+/** Subjects a requestBuild is starting, reserved before its first await so a second press cannot spawn twice. */
+const starting = new Set<string>()
+
+async function logLine($: any, text: string): Promise<void> {
+  try {
+    await $.ui.log(text)
+  } catch {
+    // nowhere to log
+  }
+}
 
 /** Verified Evidence reads: inside the cwd by spelling (containedPath) and by where it lands (realPath). */
 async function evidenceReader($: any): Promise<(file: string) => Promise<string | undefined>> {
@@ -136,7 +147,7 @@ async function commit($: any, modelPath: string, model: BehaviourModel) {
 }
 
 async function failLoad($: any, modelPath: string, error: string): Promise<ToolAnswer> {
-  await update($, modelState, () => ({ path: modelPath, error }))
+  await serial(() => update($, modelState, () => ({ path: modelPath, error })))
   await openPane($)
   return { deny: error }
 }
@@ -166,7 +177,11 @@ async function writeStatus($: any, subject: BuildSubject, status: BuildStatus): 
   const { path, model } = await readModel($)
   if (path === undefined || model === undefined) return
   const next = withBuildStatus(model, subject, status)
-  await $.fs.write(path, pretty(next)).catch(() => undefined)
+  try {
+    await $.fs.write(path, pretty(next))
+  } catch (err) {
+    await logLine($, `how: could not write the ${status} status of ${subjectKey(subject)} to ${path}: ${errText(err)}`)
+  }
   await update($, modelState, s => ({ ...s, ...asStored({ model: next }) }))
 }
 const setStatus = ($: any, subject: BuildSubject, status: BuildStatus) => serial(() => writeStatus($, subject, status))
@@ -182,10 +197,13 @@ async function clearPending($: any, key: string): Promise<void> {
 
 /** The builder `agentId` ended, or timed out, with no refresh: its subject failed. */
 async function failPending($: any, agentId: string): Promise<void> {
-  const entry = (await read($, pendingState))[agentId]
-  if (entry === undefined) return
-  await clearPending($, subjectKey(entry.subject))
-  await setStatus($, entry.subject, 'failed')
+  // Checked inside the writer: a merge queued ahead of this has already cleared the entry.
+  await serial(async () => {
+    const entry = (await read($, pendingState))[agentId]
+    if (entry === undefined) return
+    await clearPending($, subjectKey(entry.subject))
+    await writeStatus($, entry.subject, 'failed')
+  })
 }
 
 /** `mcp__how__refresh` with a fragment: merge it into the file model, verify, write; a bad merge fails the subject. */
@@ -211,6 +229,10 @@ async function mergeBuild($: any, modelPath: string, fragmentPath: string): Prom
     const merged = mergeFragment(parsed.model, fragmentText)
     const subject = pending?.subject ?? merged.subject
     if (subject) await clearPending($, subjectKey(subject))
+    if (pending && merged.subject && subjectKey(merged.subject) !== subjectKey(pending.subject)) {
+      await writeStatus($, pending.subject, 'failed')
+      return { deny: `fragment builds ${subjectKey(merged.subject)} but ${fragmentPath} is for ${subjectKey(pending.subject)}` }
+    }
     if ('error' in merged) {
       if (subject) await writeStatus($, subject, 'failed')
       return { deny: merged.error }
@@ -236,25 +258,36 @@ export async function requestReload($: any): Promise<void> {
  * 10 minutes. Lives here because the engine follows `$` only into functions of the same file.
  */
 export async function requestBuild($: any, subject: BuildSubject): Promise<void> {
+  const key = subjectKey(subject)
+  if (starting.has(key)) return
+  starting.add(key) // before any await: a second press while this one starts is a no-op
+  try {
+    await startBuild($, subject, key)
+  } finally {
+    starting.delete(key) // started (then pending guards it), refused or failed
+  }
+}
+
+async function startBuild($: any, subject: BuildSubject, key: string): Promise<void> {
   const { path, model } = await readModel($)
   if (path === undefined || model === undefined) return
   const pending = await read($, pendingState)
-  if (Object.values(pending).some(p => subjectKey(p.subject) === subjectKey(subject))) return
+  if (Object.values(pending).some(p => subjectKey(p.subject) === key)) return
   if (buildStatusOf(model, subject) === 'building' || buildStatusOf(model, subject) === 'built') return
   await setStatus($, subject, 'building')
   const name = subjectName(model, subject)
   const fragmentPath = fragmentPathFor(path, subject)
-  let root = ''
+  let root: string | undefined
   try {
-    root = String($.plugin.root ?? '')
+    root = typeof $.plugin.root === 'string' && $.plugin.root !== '' ? $.plugin.root : undefined
   } catch {
-    root = ''
+    root = undefined
   }
-  const referencePath = `${root}/skills/how/references/behaviour-model.md`
+  const referencePath = root === undefined ? undefined : `${root}/skills/how/references/behaviour-model.md`
   const prompt = builderPrompt({ modelPath: path, subject, name, fragmentPath, referencePath })
   let spawned: { agentId?: string; deny?: string }
   try {
-    spawned = await $.agent.spawn({ subagentType: BUILDER_AGENT, description: `how: build ${name}`, prompt })
+    spawned = await $.agent.spawn({ subagentType: BUILDER_AGENT, description: spawnDescription(name), prompt })
   } catch (err) {
     spawned = { deny: errText(err) }
   }

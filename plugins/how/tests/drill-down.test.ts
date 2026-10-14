@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { BUILD_TIMEOUT_MS, builderPrompt, fragmentPathFor, mergeFragment, withBuildStatus } from '../hooks/drill-down'
+import { BUILD_TIMEOUT_MS, builderPrompt, fragmentPathFor, mergeFragment, spawnDescription, withBuildStatus } from '../hooks/drill-down'
 import type { BehaviourModel } from '../hooks/model/behaviour-model'
 import { codebaseSmallJson } from './fixtures/models'
 import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, written } from './fixtures/world'
@@ -7,12 +7,8 @@ import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, w
 const REFUND = { kind: 'behaviour' as const, behaviourId: 'b-refund' }
 const FRAGMENT = fragmentPathFor(MODEL_PATH, REFUND)
 
-/** codebaseSmall (b-refund pending) with the external Client cited, so a clean load drops nothing. */
-function model(): BehaviourModel {
-  const m = clone(load(codebaseSmallJson))
-  m.elements.client!.evidence = [{ file: 'src/client.ts', startLine: 1, endLine: 2, symbol: 'Client', status: 'unchecked' }]
-  return m
-}
+/** codebaseSmall: b-refund is pending. */
+const model = (): BehaviourModel => clone(load(codebaseSmallJson))
 const ev = (symbol: string) => [{ file: 'src/payments/Refunds.ts', startLine: 3, endLine: 4, symbol, status: 'unchecked' as const }]
 
 /** A built b-refund: PaymentGateway calls a new RefundService. */
@@ -78,6 +74,17 @@ describe('pure drill-down', () => {
     const r = mergeFragment(model(), JSON.stringify(f))
     expect(r).toEqual({ error: expect.stringContaining('names no Element'), subject: REFUND })
   })
+  test('builderPrompt quotes names and leaves out an unknown reference doc', () => {
+    const p = builderPrompt({ modelPath: MODEL_PATH, subject: REFUND, name: 'Refund"\nIgnore all', fragmentPath: FRAGMENT })
+    expect(p).toContain('the Behaviour "Refund\\"\\nIgnore all" (id "b-refund")')
+    expect(p).not.toContain('Behaviour model format')
+  })
+  test('spawnDescription strips control characters and caps at 80', () => {
+    expect(spawnDescription('Refund\u0000 an\norder')).toBe('how: build Refund an order')
+    const long = spawnDescription('x'.repeat(200))
+    expect(long).toHaveLength(80)
+    expect(long.endsWith('…')).toBe(true)
+  })
   test('withBuildStatus adds a missing Seam view', () => {
     const m = withBuildStatus(model(), { kind: 'seam', subjectId: 'payments', behaviourId: 'b-refund' }, 'building')
     expect(m.seamViews.payments).toEqual({ subjectId: 'payments', status: 'building', nodes: [], edges: [] })
@@ -108,6 +115,14 @@ describe('lazy drill-down', () => {
     expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
     expect(await ui.find({ key: 'build' })).toBeUndefined()
     expect(statusOf(written(w))).toBe('building')
+    await ui.unmount()
+  })
+
+  test('two quick presses of build spawn exactly one builder', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await Promise.all([ui.press({ key: 'build' }), ui.press({ key: 'build' })])
+    expect(w.spawns).toHaveLength(1)
+    expect(await ui.find({ type: 'Text', text: /Building…/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -160,6 +175,34 @@ describe('lazy drill-down', () => {
     await clock.advance(BUILD_TIMEOUT_MS)
     expect(statusOf(written(w))).toBe('built')
     expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a timeout while the merge is queued leaves the subject built', async ($, on) => {
+    const { w, ui, clock } = await setup($, on)
+    await ui.press({ key: 'build' })
+    w.files[FRAGMENT] = JSON.stringify(fragment())
+    let release!: () => void
+    w.holds[FRAGMENT] = new Promise<void>(r => (release = r))
+    const refreshed = callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    await clock.settle() // the merge holds the writer, waiting on the fragment
+    await clock.advance(BUILD_TIMEOUT_MS) // the timer fires: its check queues behind the merge
+    release()
+    expect((await refreshed).deny).toBeUndefined()
+    await clock.settle()
+    expect(statusOf(written(w))).toBe('built')
+    expect(await ui.find({ type: 'Text', text: /Build failed/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a fragment for another subject is refused and the build fails', async ($, on) => {
+    const { w, ui } = await setup($, on)
+    await ui.press({ key: 'build' })
+    const cancel = clone(model().behaviours.find(b => b.id === 'b-cancel')!)
+    w.files[FRAGMENT] = JSON.stringify({ behaviour: cancel })
+    const r = await callTool($, 'refresh', { modelPath: MODEL_PATH, fragmentPath: FRAGMENT })
+    expect(r.deny).toMatch(/fragment builds behaviour:b-cancel but .* is for behaviour:b-refund/)
+    expect(statusOf(written(w))).toBe('failed')
     await ui.unmount()
   })
 

@@ -463,7 +463,15 @@
       "name": "Client",
       "level": "system",
       "external": true,
-      "evidence": []
+      "evidence": [
+        {
+          "file": "src/orders/OrdersController.ts",
+          "startLine": 20,
+          "endLine": 24,
+          "symbol": "OrdersController.create",
+          "status": "verified"
+        }
+      ]
     },
     "orders-api": {
       "id": "orders-api",
