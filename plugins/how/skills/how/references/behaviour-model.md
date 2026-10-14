@@ -32,7 +32,7 @@ type BehaviourModel = {
 ### Evidence
 - `file`: repo-relative path.
 - `startLine`, `endLine`: 1-based inclusive line range.
-- `symbol`: the enclosing function, class or member name.
+- `symbol`: a name written on the cited lines or within 3 lines of them: the enclosing function, class or member when it is that close, otherwise the name the cited line calls or defines. The Evidence check marks Evidence whose `symbol` is further away `inferred`.
 - `hunk`: the diff hunk text, in PR mode when the Evidence is a changed line.
 - `status`: `verified` once checked against the code, `inferred` when reasoned rather than read, `unchecked` before the evidence check runs. Producers write `unchecked` or `inferred`; the evidence check upgrades or downgrades.
 

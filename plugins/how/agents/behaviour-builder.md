@@ -25,7 +25,8 @@ Spend about 25 tool calls. When they are spent, reply with what you have proven 
 
 ## Rules
 
-- Every Element and every Step carries Evidence: `file` (repo-relative), `startLine`, `endLine` (1-based, inclusive) and `symbol` (the enclosing function, class or member). Write `status: "unchecked"`; the Evidence check verifies it.
+- Every Element and every Step carries Evidence: `file` (repo-relative), `startLine`, `endLine` (1-based, inclusive) and `symbol`. Write `status: "unchecked"`; the Evidence check verifies it.
+- `symbol` is a name written on the cited lines, because the Evidence check verifies it only when it appears within 3 lines of the range and marks it Inferred otherwise. Use the enclosing function, class or member when its name is that close; inside a long body or an anonymous callback (a route handler, a lambda) use the name the cited line calls or defines instead, such as `repository.save`, `tenantOf` or `get_exporter`. Before you reply, check each `symbol` against the lines you read.
 - Never invent. An Element, Step, Seam, edge or Contract you cannot point at in the code is left out.
 - An edge made by dependency injection, reflection or a message bus is not a direct call: give its Evidence `status: "inferred"` and cite the code that suggests it (the binding, the registration, the publish and subscribe sites).
 - External Elements (callers, third-party services, datastores) carry Evidence too: cite the code in the repo that receives or calls them, such as the route registration or the client call site. An Element without Evidence is dropped by the Evidence check, with every Step that touches it.

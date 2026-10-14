@@ -64,6 +64,8 @@ When codebase mode finds no Entry point, reply in one line — `how: codebase mo
 
 For every Entry point, add its Element now with Evidence on its registration or definition line.
 
+Every Evidence `symbol` you write is a name that appears on its cited lines or within 3 lines of them (the Evidence check marks it Inferred otherwise): for a route registered with an anonymous handler, cite the registration line with a name on it, such as `router.post`, not the function that encloses it further up.
+
 ## 5. Order and status
 
 Order the Behaviours: PR mode by risk (Contract change, then error-handling change, then fan-in), codebase mode by score. The first 7 get `status: "built"` and are built in step 6.
