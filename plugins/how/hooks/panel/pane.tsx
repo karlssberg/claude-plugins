@@ -1,6 +1,7 @@
 // The Pane `how`: breadcrumb frame around the current view of the drill-down stack.
 import type { BehaviourModel } from '../model/behaviour-model'
 import { renderMap } from './behaviour-map'
+import { renderDiagramView } from './diagram-view'
 import { type ModelState, type Navigation, popTo, type ViewRef } from './navigation'
 import { truncate, wrap } from './text'
 
@@ -17,6 +18,8 @@ export type PaneEnv = {
   nav: Navigation
   updateNav: (fn: (n: Navigation) => Navigation) => Promise<unknown>
   reload: () => Promise<unknown> // register.tsx's requestReload; a stub until Task 10
+  /** Builds a pending or failed Behaviour or Seam view: register.tsx's requestBuild; a stub until Task 10. */
+  requestBuild: (subject: Extract<ViewRef, { kind: 'behaviour' | 'seam' }>) => Promise<unknown>
 }
 
 export function crumbLabel(ref: ViewRef, model: BehaviourModel): string {
@@ -32,11 +35,7 @@ export function crumbLabel(ref: ViewRef, model: BehaviourModel): string {
   }
 }
 
-const PLACEHOLDER: Record<'behaviour' | 'seam' | 'evidence', string> = {
-  behaviour: 'Behaviour view — coming in a later task',
-  seam: 'Seam view — coming in a later task',
-  evidence: 'Evidence — coming in a later task',
-}
+const EVIDENCE_PLACEHOLDER = 'Evidence — coming in a later task'
 
 export async function renderPane(env: PaneEnv, e: unknown) {
   const { ui, nav, updateNav } = env
@@ -94,8 +93,10 @@ export async function renderPane(env: PaneEnv, e: unknown) {
   const body =
     current.kind === 'map' ? (
       await renderMap(ui, updateNav, model, nav, columns, surface)
+    ) : current.kind === 'evidence' ? (
+      <Text dimColor>{truncate(EVIDENCE_PLACEHOLDER, columns)}</Text>
     ) : (
-      <Text dimColor>{truncate(PLACEHOLDER[current.kind], columns)}</Text>
+      await renderDiagramView(env, current, model, nav, columns, surface)
     )
 
   return (

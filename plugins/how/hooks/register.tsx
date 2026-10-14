@@ -16,6 +16,15 @@ export const navState = atom({ plugin: 'how', key: 'nav' } as const, initialNavi
  */
 export async function requestReload(_$: unknown): Promise<void> {}
 
+/**
+ * Build a pending or failed Behaviour or Seam view. STUB: Task 10 implements it (the `build` and `retry` Buttons
+ * call it); until then it deliberately does nothing. Lives here for the same reason as requestReload.
+ */
+export async function requestBuild(
+  _$: unknown,
+  _subject: { kind: 'behaviour'; behaviourId: string } | { kind: 'seam'; subjectId: string; behaviourId: string },
+): Promise<void> {}
+
 export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     // `$` never leaves this file: the panel layer gets plain data and closures.
@@ -25,6 +34,7 @@ export const register: Register = on => {
       nav: await read($, navState),
       updateNav: (fn: (n: Navigation) => Navigation) => update($, navState, fn),
       reload: () => requestReload($),
+      requestBuild: (subject: Parameters<typeof requestBuild>[1]) => requestBuild($, subject),
     }
     return renderPane(env, e)
   })
