@@ -23,16 +23,21 @@ git apply "$fixture/pr.patch"
 git add -A
 git -c user.name=how-eval -c user.email=how-eval@example.invalid commit -qm "$(cat "$fixture/pr-message.txt")"
 
-# Headless runs answer no permission prompts: allow only what the skill and its builders use, and deny the
-# rest (dontAsk) rather than wait. The skill's own shell commands are git, mkdir -p and pwd -P (worktree path).
+# Headless runs answer no permission prompts: allow only what the skill and its builders use, and deny the rest
+# (dontAsk) rather than wait. Shell access is read-only git plus the base worktree and the cache folder; `git -C`
+# is allowed per read-only subcommand, and `-c` (git runs a program it names) is denied outright. Write is
+# scoped through its Edit rule to the model folder, .git/how. NOTE: .git is a protected path, which dontAsk
+# denies whatever the allow rules say, so this run is expected to fail to write the model (see README).
 start=$(date +%s)
 status=0
 claude -p "/how HEAD~1..HEAD" --plugin-dir "$plugin" --max-budget-usd 5 --output-format json \
   --permission-mode dontAsk \
-  --allowedTools Skill Read Grep Glob LSP Write Agent \
+  --allowedTools Skill Read Grep Glob LSP Agent "Edit(./.git/how/**)" \
   "Bash(git log:*)" "Bash(git show:*)" "Bash(git diff:*)" "Bash(git blame:*)" "Bash(git rev-parse:*)" \
   "Bash(git merge-base:*)" "Bash(git worktree:*)" "Bash(git status:*)" "Bash(git symbolic-ref:*)" \
-  "Bash(git -C:*)" "Bash(mkdir -p:*)" "Bash(pwd:*)" "mcp__how__*" \
+  "Bash(git -C * rev-parse:*)" "Bash(git -C * log:*)" "Bash(git -C * show:*)" "Bash(git -C * diff:*)" \
+  "Bash(git -C * blame:*)" "Bash(mkdir -p:*)" "mcp__how__*" \
+  --disallowedTools "Bash(git * -c *)" \
   >"$out.out.json" || status=$?
 end=$(date +%s)
 echo "wall time: $((end - start))s; claude exit $status; output: $out.out.json"

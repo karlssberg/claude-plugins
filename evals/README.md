@@ -22,9 +22,16 @@ node evals/score.mjs evals/results/http-orders.run1.model.json evals/fixtures/ht
 
 - `run-fixture.sh` never creates a `.git` inside this repo.
 - The producer runs as `claude -p "/how HEAD~1..HEAD" --plugin-dir plugins/how --max-budget-usd 5 --output-format json --permission-mode dontAsk --allowedTools …`.
-  - Headless runs cannot answer permission prompts, so the allowlist names what the skill and its builders use: Skill, Read, Grep, Glob, LSP, Write, Agent, `mcp__how__*`, and `Bash` limited to git (`log`, `show`, `diff`, `blame`, `rev-parse`, `merge-base`, `worktree`, `status`, `symbolic-ref`, `-C`), `mkdir -p` and `pwd`.
-  - `dontAsk` denies anything else instead of waiting for an answer. The skill's `(cd "$W" && pwd -P)` compound may be denied; `git -C "$W" rev-parse --show-toplevel` gives the same path within the list.
-  - **This allowlist has not been run live** (ruling R31). The three runs below used `--permission-mode bypassPermissions` inside a sandbox, and `open-fixture.sh` used `--allowedTools mcp__how__open`.
+  - Headless runs cannot answer permission prompts, so the allowlist names only what the skill and its builders use:
+    - Skill, Read, Grep, Glob, LSP, Agent and `mcp__how__*`;
+    - `Edit(./.git/how/**)` for writes. The Write tool is checked against Edit path rules, and a `Write(path)` rule is never consulted, so this one rule scopes Write to the model folder;
+    - `Bash` limited to read-only git: `log`, `show`, `diff`, `blame`, `rev-parse`, `merge-base`, `status` and `symbolic-ref`. `worktree` is allowed for the base worktree, and `mkdir -p` for the cache folder;
+    - `git -C <path>` only as `Bash(git -C * rev-parse|log|show|diff|blame:*)`. The docs allow a `*` mid-pattern; `:*` is recognised only at the end.
+  - `--disallowedTools "Bash(git * -c *)"` denies git's `-c`, which can make git run a program.
+  - Residual risk: a mid-pattern `*` stands for any text, so `git -C . push origin log` still matches `Bash(git -C * log:*)`. The rules narrow the commands allowed but do not make them read-only.
+  - `dontAsk` denies anything off the list instead of waiting for an answer.
+  - **Known blocker, from the docs and not yet observed in a run:** `.git` is a protected path, and in `dontAsk` mode protected-path writes are denied whatever the allow rules say (permission-modes, Protected paths). So under this allowlist the skill cannot write `.git/how/<sha>.json`, and `mkdir -p .git/how` is likely denied too. The run is expected to end with "no model", and the script then exits 1. The three runs below used `--permission-mode bypassPermissions` inside a sandbox, which does allow protected-path writes. A working headless run needs `bypassPermissions` in an isolated environment, `auto` mode (the classifier decides), or a cache path outside `.git`. That choice is for the controller.
+  - **This allowlist has not been run live** (ruling R31). `open-fixture.sh` used `--allowedTools mcp__how__open`.
 - The model lands at `$(git rev-parse --git-common-dir)/how/<head sha>.json` in the temp repo. It is copied to `results/<name>.run<n>.model.json`, and the CLI's JSON output to `results/<name>.run<n>.out.json`, so a rerun never overwrites an earlier one.
 - When no model was written, the script prints the CLI's JSON answer and exits 1.
 - `score.mjs` prints `{ behaviourRecall, evidenceVerifiedRate, seamRecall, incidentalAccuracy, maxNodesPerView, contractChangedRecall, swallowedRecall, pass }` and exits 1 when `pass` is false.

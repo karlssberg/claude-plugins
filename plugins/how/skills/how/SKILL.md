@@ -44,10 +44,10 @@ Now create the one base worktree this run uses. LSP works on it as on any checko
 W="$TMPDIR/how-base-<baseSha first 12>"
 git worktree remove --force "$W" 2>/dev/null; git worktree prune
 git worktree add --detach "$W" <baseSha>
-(cd "$W" && pwd -P)
+git -C "$W" rev-parse --show-toplevel
 ```
 
-The subshell prints the worktree's absolute path: base builders get that path. **Every exit from here on removes the worktree** with `git worktree remove --force <path>`: an early stop, an error at any step, and the end of step 9.
+The last command prints the worktree's absolute path, with symlinks resolved and without changing your shell's directory: base builders get that path. **Every exit from here on removes the worktree** with `git worktree remove --force <path>`: an early stop, an error at any step, and the end of step 9.
 
 ## 3. Intent (PR mode)
 
