@@ -65,6 +65,17 @@ describe('Behaviour map', () => {
       await ui.unmount()
     })
 
+    test(`codebase mode orders by score, not risk (${surface})`, async ($, on) => {
+      const m = clone(load(codebaseSmallJson))
+      m.behaviours.find(b => b.id === 'b-refund')!.risks = ['contract-change']
+      const ui = await mount($, on, surface, { model: m })
+      const keys = (await ui.findAll({ type: 'Button' }))
+        .map((b: { key?: string }) => b.key)
+        .filter((k: string | undefined) => k?.startsWith('behaviour-'))
+      expect(keys).toEqual(['behaviour-b-place', 'behaviour-b-cancel', 'behaviour-b-refund'])
+      await ui.unmount()
+    })
+
     test(`risk chips then score order (${surface})`, async ($, on) => {
       const ui = await mount($, on, surface, { model: load(prSmallJson) })
       const place = await ui.find({ key: 'behaviour-b-place' })
@@ -270,8 +281,11 @@ describe('Behaviour map', () => {
 
 describe('orderBehaviours', () => {
   const b = (id: string, score: number, risks: string[]) => ({ id, rank: { score }, risks }) as any
-  test('equal risk orders by score; no-risk sorts after risk', () => {
-    const out = orderBehaviours([b('none-hi', 0.99, []), b('fan-lo', 0.1, ['high-fan-in']), b('fan-hi', 0.5, ['high-fan-in']), b('err', 0.2, ['error-handling-change'])])
-    expect(out.map(x => x.id)).toEqual(['err', 'fan-hi', 'fan-lo', 'none-hi'])
+  const four = () => [b('none-hi', 0.99, []), b('fan-lo', 0.1, ['high-fan-in']), b('fan-hi', 0.5, ['high-fan-in']), b('err', 0.2, ['error-handling-change'])]
+  test('PR mode: equal risk orders by score; no-risk sorts after risk', () => {
+    expect(orderBehaviours(four(), 'pr').map(x => x.id)).toEqual(['err', 'fan-hi', 'fan-lo', 'none-hi'])
+  })
+  test('codebase mode orders by score alone', () => {
+    expect(orderBehaviours(four(), 'codebase').map(x => x.id)).toEqual(['none-hi', 'fan-hi', 'err', 'fan-lo'])
   })
 })

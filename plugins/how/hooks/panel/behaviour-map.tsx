@@ -13,9 +13,13 @@ const RISK_ORDER: Behaviour['risks'] = ['contract-change', 'error-handling-chang
 const riskRank = (r: Behaviour['risks'][number]) => RISK_ORDER.indexOf(r)
 const sortedRisks = (b: Behaviour) => [...b.risks].sort((a, c) => riskRank(a) - riskRank(c))
 
-/** Behaviours ordered by their most serious risk (contract, error handling, fan-in; none last), then rank.score descending. */
-export function orderBehaviours(behaviours: Behaviour[]): Behaviour[] {
-  const top = (b: Behaviour) => (b.risks.length === 0 ? RISK_ORDER.length : riskRank(sortedRisks(b)[0]!))
+/**
+ * Behaviours in map order. PR mode: by their most serious risk (contract, error handling, fan-in; none last), then
+ * rank.score descending. Codebase mode: by rank.score descending alone.
+ */
+export function orderBehaviours(behaviours: Behaviour[], mode: BehaviourModel['scope']['mode']): Behaviour[] {
+  const top = (b: Behaviour) =>
+    mode !== 'pr' ? 0 : b.risks.length === 0 ? RISK_ORDER.length : riskRank(sortedRisks(b)[0]!)
   return behaviours
     .map((b, i) => ({ b, i }))
     .sort((x, y) => top(x.b) - top(y.b) || y.b.rank.score - x.b.rank.score || x.i - y.i)
@@ -76,7 +80,7 @@ export async function renderMap(
 ) {
   const { Box, Text, Button, Svg } = ui
   const width = Math.max(10, columns)
-  const ordered = orderBehaviours(model.behaviours)
+  const ordered = orderBehaviours(model.behaviours, model.scope.mode)
   const shown = nav.showAll ? ordered : ordered.slice(0, MAP_LIMIT)
   const hidden = ordered.length - shown.length
   const hasSvg = (surface === 'desktop' || surface === 'vscode') && Svg !== undefined
