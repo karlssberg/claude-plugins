@@ -304,10 +304,14 @@ function splitLines(text: string): string[] {
   return l
 }
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** `name` as a whole identifier: not inside a longer one (`id` is not found in `valid`, `get` not in `target`). */
+const hasIdentifier = (text: string, name: string) => new RegExp(`(?<![\\w$])${escapeRegExp(name)}(?![\\w$])`).test(text)
+
 // A dotted/qualified symbol such as "OrderService.cancel" also matches by its last segment.
 function contains(text: string, symbol: string): boolean {
   if (symbol === '') return false
-  if (text.includes(symbol)) return true
+  if (hasIdentifier(text, symbol)) return true
   const last = symbol.split(/[.:#/]+/).filter(Boolean).pop()
-  return last !== undefined && last !== symbol && text.includes(last)
+  return last !== undefined && last !== symbol && hasIdentifier(text, last)
 }

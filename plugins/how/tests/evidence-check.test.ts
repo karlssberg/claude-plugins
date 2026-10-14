@@ -250,6 +250,22 @@ describe('verifyEvidence', () => {
     expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
   })
 
+  test('a symbol matches only on identifier boundaries, in range and in the whole file', async () => {
+    const text = ['const valid = isValid(x)', 'const target = 1', 'this.cancel(order)', '$id = 2', 'const id_x = 3'].join('\n')
+    const status = async (symbol: string) => {
+      const m = tiny([ev('x.ts', 1, 1, symbol)], [ev('x.ts', 1, 1, 'valid')], [ev('x.ts', 1, 1, 'valid')])
+      const r = await verifyEvidence(m, async () => text)
+      return r.model.elements.a?.evidence[0]?.status ?? 'dropped'
+    }
+    expect(await status('id')).toBe('dropped') // not in valid, isValid, $id or id_x
+    expect(await status('get')).toBe('dropped') // not in target
+    expect(await status('OrderService.cancel')).toBe('verified') // last segment: cancel(
+    expect(await status('valid')).toBe('verified')
+    expect(await status('target')).toBe('verified')
+    expect(await status('id_x')).toBe('inferred') // whole-file fallback, line 5
+    expect(await status('Order.id_x')).toBe('inferred')
+  })
+
   test('base-only Elements and base Steps are not checked against head files', async () => {
     const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('gone.ts', 1, 2, 'Old')], [ev('gone.ts', 1, 2, 'Old')])
     const b = m.behaviours[0]!
