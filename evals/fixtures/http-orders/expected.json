@@ -1,0 +1,7 @@
+{
+  "behaviours": [{ "entryPoint": "POST /orders" }, { "entryPoint": "GET /orders" }],
+  "seams": [{ "name": "OrderRepository", "kind": "interface" }],
+  "incidental": ["README.md", "spec/orders.spec.ts"],
+  "contractChanged": ["OrderRepository"],
+  "swallowed": ["sendReceipt"]
+}

@@ -1,0 +1,136 @@
+diff --git a/README.md b/README.md
+index a2ff4d4..b28e370 100644
+--- a/README.md
++++ b/README.md
+@@ -5,4 +5,6 @@ A tiny orders service.
+ - `POST /orders` creates an order and emails a receipt.
+ - `GET /orders/:id` returns one order.
+ 
++Every request must carry an `X-Tenant-Id` header; orders are scoped to their tenant.
++
+ Set `ORDER_STORE=postgres` to keep orders in Postgres; the default is in memory.
+diff --git a/src/orders.ts b/src/orders.ts
+index ee63dc7..7eb5f7a 100644
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -1,27 +1,43 @@
+ import { randomUUID } from 'node:crypto'
+-import { Router } from 'express'
++import { Router, type Request } from 'express'
+ import { loadConfig } from './config'
+ import { sendReceipt } from './receipts'
+ import type { Order, OrderRepository } from './repositories'
+ 
++/** The caller's tenant, from the X-Tenant-Id header. */
++function tenantOf(req: Request): string | undefined {
++  const tenantId = req.header('x-tenant-id')
++  return tenantId && tenantId.trim() !== '' ? tenantId : undefined
++}
++
+ export function ordersRouter(repository: OrderRepository): Router {
+   const router = Router()
+   const { mailerUrl } = loadConfig()
+ 
+   router.post('/', async (req, res) => {
++    const tenantId = tenantOf(req)
++    if (!tenantId) {
++      res.status(401).json({ error: 'X-Tenant-Id header is required' })
++      return
++    }
+     const { customerEmail, items } = req.body ?? {}
+     if (typeof customerEmail !== 'string' || !Array.isArray(items) || items.length === 0) {
+       res.status(400).json({ error: 'customerEmail and items are required' })
+       return
+     }
+-    const order: Order = { id: randomUUID(), customerEmail, items, createdAt: new Date().toISOString() }
++    const order: Order = { id: randomUUID(), tenantId, customerEmail, items, createdAt: new Date().toISOString() }
+     await repository.save(order)
+     await sendReceipt(mailerUrl, order)
+     res.status(201).json(order)
+   })
+ 
+   router.get('/:id', async (req, res) => {
+-    const order = await repository.findById(req.params.id)
++    const tenantId = tenantOf(req)
++    if (!tenantId) {
++      res.status(401).json({ error: 'X-Tenant-Id header is required' })
++      return
++    }
++    const order = await repository.findById(tenantId, req.params.id)
+     if (!order) {
+       res.status(404).json({ error: 'order not found' })
+       return
+diff --git a/src/repositories/index.ts b/src/repositories/index.ts
+index 606e277..4940bc1 100644
+--- a/src/repositories/index.ts
++++ b/src/repositories/index.ts
+@@ -4,6 +4,7 @@ import { PostgresOrderRepository } from './postgres'
+ 
+ export type Order = {
+   id: string
++  tenantId: string
+   customerEmail: string
+   items: { sku: string; quantity: number }[]
+   createdAt: string
+@@ -12,7 +13,7 @@ export type Order = {
+ /** Where orders are kept. The implementation is chosen by config (ORDER_STORE). */
+ export interface OrderRepository {
+   save(order: Order): Promise<void>
+-  findById(id: string): Promise<Order | undefined>
++  findById(tenantId: string, id: string): Promise<Order | undefined>
+ }
+ 
+ export function createOrderRepository(config: Config): OrderRepository {
+diff --git a/src/repositories/memory.ts b/src/repositories/memory.ts
+index 5c19982..a1b148d 100644
+--- a/src/repositories/memory.ts
++++ b/src/repositories/memory.ts
+@@ -7,7 +7,8 @@ export class InMemoryOrderRepository implements OrderRepository {
+     this.orders.set(order.id, order)
+   }
+ 
+-  async findById(id: string): Promise<Order | undefined> {
+-    return this.orders.get(id)
++  async findById(tenantId: string, id: string): Promise<Order | undefined> {
++    const order = this.orders.get(id)
++    return order?.tenantId === tenantId ? order : undefined
+   }
+ }
+diff --git a/src/repositories/postgres.ts b/src/repositories/postgres.ts
+index d840aca..c0416b1 100644
+--- a/src/repositories/postgres.ts
++++ b/src/repositories/postgres.ts
+@@ -9,11 +9,15 @@ export class PostgresOrderRepository implements OrderRepository {
+   }
+ 
+   async save(order: Order): Promise<void> {
+-    await this.pool.query('INSERT INTO orders (id, body) VALUES ($1, $2)', [order.id, JSON.stringify(order)])
++    await this.pool.query('INSERT INTO orders (id, tenant_id, body) VALUES ($1, $2, $3)', [
++      order.id,
++      order.tenantId,
++      JSON.stringify(order),
++    ])
+   }
+ 
+-  async findById(id: string): Promise<Order | undefined> {
+-    const result = await this.pool.query('SELECT body FROM orders WHERE id = $1', [id])
++  async findById(tenantId: string, id: string): Promise<Order | undefined> {
++    const result = await this.pool.query('SELECT body FROM orders WHERE tenant_id = $1 AND id = $2', [tenantId, id])
+     return result.rows[0] ? (JSON.parse(result.rows[0].body) as Order) : undefined
+   }
+ }
+diff --git a/spec/orders.spec.ts b/spec/orders.spec.ts
+index 00af925..8db6c24 100644
+--- a/spec/orders.spec.ts
++++ b/spec/orders.spec.ts
+@@ -4,7 +4,8 @@ import { InMemoryOrderRepository } from '../src/repositories/memory'
+ 
+ test('saves and finds an order', async () => {
+   const repo = new InMemoryOrderRepository()
+-  const order = { id: 'o1', customerEmail: 'a@example.com', items: [{ sku: 'x', quantity: 1 }], createdAt: 'now' }
++  const order = { id: 'o1', tenantId: 't1', customerEmail: 'a@example.com', items: [{ sku: 'x', quantity: 1 }], createdAt: 'now' }
+   await repo.save(order)
+-  assert.deepEqual(await repo.findById('o1'), order)
++  assert.deepEqual(await repo.findById('t1', 'o1'), order)
++  assert.equal(await repo.findById('t2', 'o1'), undefined)
+ })

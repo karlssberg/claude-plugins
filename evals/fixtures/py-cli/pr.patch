@@ -1,0 +1,127 @@
+diff --git a/README.md b/README.md
+index 664f9c7..8563d6e 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ A small notes CLI.
+ 
+-- `notes export --format json|csv OUT` writes every note to OUT.
++- `notes export --format json|csv OUT` writes every note to OUT and prints how many it wrote; an unknown format exits with status 2.
+ - `notes sync` exports the notes as JSON and pushes them to the sync server.
+ 
+ The default export format comes from `NOTES_FORMAT` (default `json`).
+diff --git a/notes/cli.py b/notes/cli.py
+index d4b0224..e7b63c3 100644
+--- a/notes/cli.py
++++ b/notes/cli.py
+@@ -3,14 +3,19 @@ import os
+ import sys
+ 
+ from . import exporters  # noqa: F401  registers the built-in formats
+-from .registry import get_exporter
++from .registry import UnknownFormatError, get_exporter
+ from .store import load_notes
+ from .sync import sync
+ 
+ 
+ def cmd_export(args: argparse.Namespace) -> int:
+-    exporter = get_exporter(args.format)
+-    exporter.export(load_notes(), args.out)
++    try:
++        exporter = get_exporter(args.format)
++    except UnknownFormatError as error:
++        print(f"notes: {error}", file=sys.stderr)
++        return 2
++    count = exporter.export(load_notes(), args.out)
++    print(f"exported {count} notes to {args.out}")
+     return 0
+ 
+ 
+diff --git a/notes/exporters.py b/notes/exporters.py
+index 2081041..2180f74 100644
+--- a/notes/exporters.py
++++ b/notes/exporters.py
+@@ -7,16 +7,18 @@ from .registry import register
+ 
+ @register("json")
+ class JsonExporter:
+-    def export(self, notes: List[dict], dest: str) -> None:
++    def export(self, notes: List[dict], dest: str) -> int:
+         with open(dest, "w", encoding="utf-8") as f:
+             json.dump(notes, f, indent=2)
++        return len(notes)
+ 
+ 
+ @register("csv")
+ class CsvExporter:
+-    def export(self, notes: List[dict], dest: str) -> None:
++    def export(self, notes: List[dict], dest: str) -> int:
+         with open(dest, "w", encoding="utf-8", newline="") as f:
+             writer = csv.DictWriter(f, fieldnames=["id", "title", "body"])
+             writer.writeheader()
+             for note in notes:
+                 writer.writerow({k: note.get(k, "") for k in ("id", "title", "body")})
++        return len(notes)
+diff --git a/notes/registry.py b/notes/registry.py
+index 384739a..df78856 100644
+--- a/notes/registry.py
++++ b/notes/registry.py
+@@ -3,8 +3,14 @@ from typing import Callable, Dict, List, Protocol
+ 
+ 
+ class Exporter(Protocol):
+-    def export(self, notes: List[dict], dest: str) -> None:
+-        """Write the notes to dest."""
++    def export(self, notes: List[dict], dest: str) -> int:
++        """Write the notes to dest and return how many were written."""
++
++
++class UnknownFormatError(LookupError):
++    def __init__(self, name: str) -> None:
++        super().__init__(f"unknown export format: {name}")
++        self.name = name
+ 
+ 
+ EXPORTERS: Dict[str, Callable[[], Exporter]] = {}
+@@ -18,4 +24,6 @@ def register(name: str) -> Callable[[type], type]:
+ 
+ 
+ def get_exporter(name: str) -> Exporter:
++    if name not in EXPORTERS:
++        raise UnknownFormatError(name)
+     return EXPORTERS[name]()
+diff --git a/notes/sync.py b/notes/sync.py
+index 3da7e3f..886fa8d 100644
+--- a/notes/sync.py
++++ b/notes/sync.py
+@@ -17,7 +17,8 @@ def push(path: str) -> None:
+ def sync() -> int:
+     notes = load_notes()
+     dest = os.path.join(tempfile.gettempdir(), "notes-sync.json")
+-    get_exporter("json").export(notes, dest)
++    if get_exporter("json").export(notes, dest) == 0:
++        return 0  # nothing to push
+     try:
+         push(dest)
+     except Exception:
+diff --git a/tests/test_registry.py b/tests/test_registry.py
+index 5bdc61b..1cff46b 100644
+--- a/tests/test_registry.py
++++ b/tests/test_registry.py
+@@ -1,7 +1,14 @@
+ from notes import exporters  # noqa: F401
+-from notes.registry import EXPORTERS, get_exporter
++import pytest
++
++from notes.registry import EXPORTERS, UnknownFormatError, get_exporter
+ 
+ 
+ def test_builtin_formats_are_registered():
+     assert {"json", "csv"} <= set(EXPORTERS)
+     assert get_exporter("json") is not None
++
++
++def test_unknown_format_is_rejected():
++    with pytest.raises(UnknownFormatError):
++        get_exporter("yaml")

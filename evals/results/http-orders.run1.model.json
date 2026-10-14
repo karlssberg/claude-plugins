@@ -1,0 +1,1291 @@
+{
+  "version": 1,
+  "scope": {
+    "mode": "pr",
+    "target": "HEAD~1..HEAD",
+    "baseSha": "7aefad1207a84f5eb0f8923b6b2b3e4c171cfc51",
+    "headSha": "e6c7323acf908ceef2f50c3a04dc14146b8f3696"
+  },
+  "intent": {
+    "text": "Scope orders by tenant. Every order request must now carry an X-Tenant-Id header, and an order can only be read by its own tenant.",
+    "sources": [
+      "commit e6c7323"
+    ],
+    "isMissing": false
+  },
+  "intentMismatches": [
+    {
+      "claim": "Every order request must now carry an X-Tenant-Id header",
+      "observed": "tenantOf accepts any non-blank header value without validation, so a caller can read any tenant's order by sending that tenant's id; the header identifies but does not authenticate the tenant.",
+      "evidence": [
+        {
+          "file": "src/orders.ts",
+          "startLine": 8,
+          "endLine": 11,
+          "symbol": "tenantOf",
+          "status": "verified"
+        },
+        {
+          "file": "src/orders.ts",
+          "startLine": 40,
+          "endLine": 40,
+          "symbol": "ordersRouter",
+          "status": "inferred"
+        }
+      ]
+    }
+  ],
+  "behaviours": [
+    {
+      "id": "create-order",
+      "name": "Create an order",
+      "entryPointId": "post-orders",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 2,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 2,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "post-orders",
+        "create-order.http-client",
+        "create-order.tenant-of",
+        "create-order.order-repository",
+        "create-order.in-memory-repository",
+        "create-order.postgres-repository",
+        "create-order.postgres-db",
+        "create-order.send-receipt",
+        "create-order.mailer"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "create-order.http-client",
+          "to": "post-orders",
+          "label": "HTTP client sends POST /orders",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 17,
+              "endLine": 17,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "post-orders",
+          "to": "create-order.tenant-of",
+          "label": "Read tenant from X-Tenant-Id header",
+          "kind": "call",
+          "diff": "added",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 18,
+              "endLine": 22,
+              "symbol": "ordersRouter",
+              "hunk": "POST handler now calls tenantOf and returns 401 {error:'X-Tenant-Id header is required'} when missing (lines 18-22)",
+              "status": "inferred"
+            },
+            {
+              "file": "src/orders.ts",
+              "startLine": 7,
+              "endLine": 11,
+              "symbol": "tenantOf",
+              "hunk": "new tenantOf(req) helper reading the x-tenant-id header (lines 7-11)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "post-orders",
+          "to": "post-orders",
+          "label": "Validate body (customerEmail, items) and build order with tenantId",
+          "kind": "call",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 23,
+              "endLine": 28,
+              "symbol": "ordersRouter",
+              "hunk": "order literal now includes tenantId (line 28)",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "post-orders",
+          "to": "create-order.order-repository",
+          "label": "repository.save(order)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 29,
+              "endLine": 29,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            },
+            {
+              "file": "src/repositories/index.ts",
+              "startLine": 5,
+              "endLine": 11,
+              "symbol": "Order",
+              "hunk": "Order type gains tenantId: string (line 7)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "create-order.order-repository",
+          "to": "create-order.postgres-repository",
+          "label": "ORDER_STORE=postgres selects PostgresOrderRepository (otherwise InMemoryOrderRepository)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/index.ts",
+              "startLine": 19,
+              "endLine": 24,
+              "symbol": "createOrderRepository",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "create-order.postgres-repository",
+          "to": "create-order.postgres-db",
+          "label": "INSERT order with tenant_id",
+          "kind": "effect",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 11,
+              "endLine": 17,
+              "symbol": "PostgresOrderRepository.save",
+              "hunk": "save() INSERT now INSERT INTO orders (id, tenant_id, body) VALUES ($1, $2, $3) with order.tenantId (lines 12-16)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 7,
+          "from": "post-orders",
+          "to": "create-order.send-receipt",
+          "label": "sendReceipt(mailerUrl, order)",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 30,
+              "endLine": 30,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 8,
+          "from": "create-order.send-receipt",
+          "to": "create-order.mailer",
+          "label": "POST receipt to mailer",
+          "kind": "message",
+          "seamId": "create-order.mailer-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/receipts.ts",
+              "startLine": 6,
+              "endLine": 10,
+              "symbol": "sendReceipt",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s9",
+          "order": 9,
+          "from": "post-orders",
+          "to": "create-order.http-client",
+          "label": "201 response with order",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 31,
+              "endLine": 31,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e1",
+          "originStepId": "s2",
+          "transforms": [],
+          "handler": {
+            "elementId": "post-orders",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 19,
+                "endLine": 22,
+                "symbol": "ordersRouter",
+                "hunk": "returns 401 {error:'X-Tenant-Id header is required'} when missing",
+                "status": "inferred"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "added"
+        },
+        {
+          "id": "e2",
+          "originStepId": "s3",
+          "transforms": [],
+          "handler": {
+            "elementId": "post-orders",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 24,
+                "endLine": 27,
+                "symbol": "ordersRouter",
+                "status": "inferred"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e3",
+          "originStepId": "s8",
+          "transforms": [],
+          "handler": {
+            "elementId": "create-order.send-receipt",
+            "evidence": [
+              {
+                "file": "src/receipts.ts",
+                "startLine": 11,
+                "endLine": 13,
+                "symbol": "sendReceipt",
+                "status": "inferred"
+              }
+            ]
+          },
+          "isSwallowed": true,
+          "isCatchAll": true,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e4",
+          "originStepId": "s6",
+          "transforms": [],
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        }
+      ],
+      "seamIds": [
+        "create-order.order-repository-seam",
+        "create-order.mailer-seam"
+      ]
+    },
+    {
+      "id": "read-order",
+      "name": "Read an order",
+      "entryPointId": "get-order",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 1,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 2,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "create-order.http-client",
+        "get-order",
+        "create-order.tenant-of",
+        "create-order.order-repository",
+        "create-order.in-memory-repository",
+        "create-order.postgres-repository",
+        "create-order.postgres-db"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "create-order.http-client",
+          "to": "get-order",
+          "label": "GET /orders/:id with X-Tenant-Id header",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/server.ts",
+              "startLine": 11,
+              "endLine": 11,
+              "symbol": "app.use('/orders', ordersRouter(repository))",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "get-order",
+          "to": "create-order.tenant-of",
+          "label": "Read tenant from x-tenant-id header",
+          "kind": "call",
+          "diff": "added",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 35,
+              "endLine": 35,
+              "symbol": "ordersRouter",
+              "hunk": "+ const tenantId = tenantOf(req)",
+              "status": "inferred"
+            },
+            {
+              "file": "src/orders.ts",
+              "startLine": 7,
+              "endLine": 11,
+              "symbol": "tenantOf",
+              "hunk": "+function tenantOf(req: Request): string | undefined { ... }",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "get-order",
+          "to": "create-order.order-repository",
+          "label": "repository.findById(tenantId, id)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 40,
+              "endLine": 40,
+              "symbol": "ordersRouter",
+              "hunk": "- repository.findById(req.params.id)\n+ repository.findById(tenantId, req.params.id)",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "create-order.order-repository",
+          "to": "create-order.in-memory-repository",
+          "label": "In-memory: return order only if tenantId matches",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/repositories/memory.ts",
+              "startLine": 10,
+              "endLine": 13,
+              "symbol": "InMemoryOrderRepository.findById",
+              "hunk": "+ return order?.tenantId === tenantId ? order : undefined",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "create-order.order-repository",
+          "to": "create-order.postgres-repository",
+          "label": "Postgres implementation selected when ORDER_STORE=postgres",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 19,
+              "endLine": 19,
+              "symbol": "PostgresOrderRepository.findById",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "create-order.postgres-repository",
+          "to": "create-order.postgres-db",
+          "label": "SELECT body FROM orders WHERE tenant_id = $1 AND id = $2",
+          "kind": "call",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "PostgresOrderRepository.findById",
+              "hunk": "+ 'SELECT body FROM orders WHERE tenant_id = $1 AND id = $2'",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 7,
+          "from": "get-order",
+          "to": "create-order.http-client",
+          "label": "404 {error:'order not found'} when no order (also on tenant mismatch)",
+          "kind": "return",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 41,
+              "endLine": 44,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 8,
+          "from": "get-order",
+          "to": "create-order.http-client",
+          "label": "200 with the order as JSON",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 45,
+              "endLine": 45,
+              "symbol": "ordersRouter",
+              "status": "inferred"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e1",
+          "originStepId": "s2",
+          "transforms": [],
+          "handler": {
+            "elementId": "get-order",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 36,
+                "endLine": 39,
+                "symbol": "ordersRouter",
+                "hunk": "+ if (!tenantId) { res.status(401).json({ error: 'X-Tenant-Id header is required' }) ... }",
+                "status": "inferred"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "added"
+        },
+        {
+          "id": "e2",
+          "originStepId": "s3",
+          "transforms": [
+            {
+              "seamId": "create-order.order-repository-seam",
+              "into": "undefined (no order for this tenant and id)",
+              "evidence": [
+                {
+                  "file": "src/repositories/memory.ts",
+                  "startLine": 10,
+                  "endLine": 13,
+                  "symbol": "InMemoryOrderRepository.findById",
+                  "status": "verified"
+                },
+                {
+                  "file": "src/repositories/postgres.ts",
+                  "startLine": 20,
+                  "endLine": 21,
+                  "symbol": "PostgresOrderRepository.findById",
+                  "status": "verified"
+                }
+              ]
+            }
+          ],
+          "handler": {
+            "elementId": "get-order",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 41,
+                "endLine": 44,
+                "symbol": "ordersRouter",
+                "status": "inferred"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e3",
+          "originStepId": "s3",
+          "transforms": [],
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        }
+      ],
+      "seamIds": [
+        "create-order.order-repository-seam"
+      ]
+    }
+  ],
+  "elements": {
+    "post-orders": {
+      "id": "post-orders",
+      "name": "POST /orders",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/orders.ts",
+          "startLine": 17,
+          "endLine": 17,
+          "symbol": "ordersRouter",
+          "status": "inferred"
+        }
+      ]
+    },
+    "get-order": {
+      "id": "get-order",
+      "name": "GET /orders/:id",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/orders.ts",
+          "startLine": 34,
+          "endLine": 34,
+          "symbol": "ordersRouter",
+          "status": "inferred"
+        }
+      ]
+    },
+    "create-order.http-client": {
+      "id": "create-order.http-client",
+      "name": "HTTP client",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "src/orders.ts",
+          "startLine": 17,
+          "endLine": 17,
+          "symbol": "ordersRouter",
+          "status": "inferred"
+        },
+        {
+          "file": "src/server.ts",
+          "startLine": 11,
+          "endLine": 11,
+          "symbol": "app.use('/orders', ordersRouter(repository))",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.tenant-of": {
+      "id": "create-order.tenant-of",
+      "name": "tenantOf",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/orders.ts",
+          "startLine": 7,
+          "endLine": 11,
+          "symbol": "tenantOf",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.order-repository": {
+      "id": "create-order.order-repository",
+      "name": "OrderRepository",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/repositories/index.ts",
+          "startLine": 14,
+          "endLine": 17,
+          "symbol": "OrderRepository",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.in-memory-repository": {
+      "id": "create-order.in-memory-repository",
+      "name": "InMemoryOrderRepository",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/repositories/memory.ts",
+          "startLine": 3,
+          "endLine": 8,
+          "symbol": "InMemoryOrderRepository",
+          "status": "verified"
+        },
+        {
+          "file": "src/repositories/memory.ts",
+          "startLine": 3,
+          "endLine": 14,
+          "symbol": "InMemoryOrderRepository",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.postgres-repository": {
+      "id": "create-order.postgres-repository",
+      "name": "PostgresOrderRepository",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/repositories/postgres.ts",
+          "startLine": 4,
+          "endLine": 17,
+          "symbol": "PostgresOrderRepository",
+          "status": "verified"
+        },
+        {
+          "file": "src/repositories/postgres.ts",
+          "startLine": 4,
+          "endLine": 23,
+          "symbol": "PostgresOrderRepository",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.postgres-db": {
+      "id": "create-order.postgres-db",
+      "name": "Postgres orders table",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "src/repositories/postgres.ts",
+          "startLine": 12,
+          "endLine": 16,
+          "symbol": "PostgresOrderRepository.save",
+          "status": "verified"
+        },
+        {
+          "file": "src/repositories/postgres.ts",
+          "startLine": 20,
+          "endLine": 20,
+          "symbol": "PostgresOrderRepository.findById",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.send-receipt": {
+      "id": "create-order.send-receipt",
+      "name": "sendReceipt",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "src/receipts.ts",
+          "startLine": 4,
+          "endLine": 14,
+          "symbol": "sendReceipt",
+          "status": "verified"
+        }
+      ]
+    },
+    "create-order.mailer": {
+      "id": "create-order.mailer",
+      "name": "Mailer HTTP service",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "src/receipts.ts",
+          "startLine": 6,
+          "endLine": 10,
+          "symbol": "sendReceipt",
+          "status": "verified"
+        }
+      ]
+    }
+  },
+  "seams": {
+    "create-order.order-repository-seam": {
+      "id": "create-order.order-repository-seam",
+      "name": "OrderRepository interface (InMemoryOrderRepository, PostgresOrderRepository)",
+      "kind": "interface",
+      "contract": {
+        "text": "save(order: Order): Promise<void>; findById(tenantId: string, id: string): Promise<Order | undefined>. Order now carries tenantId: string; findById resolves undefined unless both tenant and id match (base: findById(id)).",
+        "evidence": [
+          {
+            "file": "src/repositories/index.ts",
+            "startLine": 5,
+            "endLine": 17,
+            "symbol": "OrderRepository",
+            "hunk": "Order type gains tenantId: string (line 7); findById(tenantId, id) (line 16)",
+            "status": "verified"
+          }
+        ]
+      },
+      "enablingPoint": {
+        "file": "src/repositories/index.ts",
+        "startLine": 19,
+        "endLine": 24,
+        "symbol": "createOrderRepository",
+        "status": "verified"
+      },
+      "isContractChanged": true
+    },
+    "create-order.mailer-seam": {
+      "id": "create-order.mailer-seam",
+      "name": "Mailer HTTP API",
+      "kind": "network",
+      "contract": {
+        "text": "POST JSON {to, subject, items} to mailerUrl; failures are ignored by the caller",
+        "evidence": [
+          {
+            "file": "src/receipts.ts",
+            "startLine": 6,
+            "endLine": 10,
+            "symbol": "sendReceipt",
+            "status": "verified"
+          }
+        ]
+      },
+      "enablingPoint": {
+        "file": "src/orders.ts",
+        "startLine": 15,
+        "endLine": 15,
+        "symbol": "ordersRouter",
+        "status": "verified"
+      },
+      "isContractChanged": false
+    }
+  },
+  "seamViews": {},
+  "incidentalChanges": [
+    {
+      "file": "README.md",
+      "hunk": "+Every request must carry an `X-Tenant-Id` header; orders are scoped to their tenant.",
+      "reason": "docs"
+    },
+    {
+      "file": "spec/orders.spec.ts",
+      "hunk": "+  const order = { id: 'o1', tenantId: 't1', ... }\n+  assert.deepEqual(await repo.findById('t1', 'o1'), order)\n+  assert.equal(await repo.findById('t2', 'o1'), undefined)",
+      "reason": "test"
+    }
+  ],
+  "baseBehaviours": [
+    {
+      "id": "create-order",
+      "name": "Create an order",
+      "entryPointId": "post-orders",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 2,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 2,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "post-orders",
+        "create-order.http-client",
+        "create-order.order-repository",
+        "create-order.in-memory-repository",
+        "create-order.postgres-repository",
+        "create-order.postgres-db",
+        "create-order.send-receipt",
+        "create-order.mailer"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "create-order.http-client",
+          "to": "post-orders",
+          "label": "HTTP client sends POST /orders",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 11,
+              "endLine": 11,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 2,
+          "from": "post-orders",
+          "to": "post-orders",
+          "label": "Validate body (customerEmail, items) and build order",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 12,
+              "endLine": 17,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 3,
+          "from": "post-orders",
+          "to": "create-order.order-repository",
+          "label": "repository.save(order)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 18,
+              "endLine": 18,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            },
+            {
+              "file": "src/repositories/index.ts",
+              "startLine": 5,
+              "endLine": 10,
+              "symbol": "Order",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 4,
+          "from": "create-order.order-repository",
+          "to": "create-order.postgres-repository",
+          "label": "ORDER_STORE=postgres selects PostgresOrderRepository (otherwise InMemoryOrderRepository)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/index.ts",
+              "startLine": 18,
+              "endLine": 23,
+              "symbol": "createOrderRepository",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 5,
+          "from": "create-order.postgres-repository",
+          "to": "create-order.postgres-db",
+          "label": "INSERT order (id, body)",
+          "kind": "effect",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 11,
+              "endLine": 13,
+              "symbol": "PostgresOrderRepository.save",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 6,
+          "from": "post-orders",
+          "to": "create-order.send-receipt",
+          "label": "sendReceipt(mailerUrl, order)",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 19,
+              "endLine": 19,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 8,
+          "from": "create-order.send-receipt",
+          "to": "create-order.mailer",
+          "label": "POST receipt to mailer",
+          "kind": "message",
+          "seamId": "create-order.mailer-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/receipts.ts",
+              "startLine": 6,
+              "endLine": 10,
+              "symbol": "sendReceipt",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s9",
+          "order": 8,
+          "from": "post-orders",
+          "to": "create-order.http-client",
+          "label": "201 response with order",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e2",
+          "originStepId": "s3",
+          "transforms": [],
+          "handler": {
+            "elementId": "post-orders",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 13,
+                "endLine": 16,
+                "symbol": "ordersRouter",
+                "status": "unchecked"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e3",
+          "originStepId": "s8",
+          "transforms": [],
+          "handler": {
+            "elementId": "create-order.send-receipt",
+            "evidence": [
+              {
+                "file": "src/receipts.ts",
+                "startLine": 11,
+                "endLine": 13,
+                "symbol": "sendReceipt",
+                "status": "unchecked"
+              }
+            ]
+          },
+          "isSwallowed": true,
+          "isCatchAll": true,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e4",
+          "originStepId": "s6",
+          "transforms": [],
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        }
+      ],
+      "seamIds": [
+        "create-order.order-repository-seam",
+        "create-order.mailer-seam"
+      ]
+    },
+    {
+      "id": "read-order",
+      "name": "Read an order",
+      "entryPointId": "get-order",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 1,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 2,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "create-order.http-client",
+        "get-order",
+        "create-order.order-repository",
+        "create-order.in-memory-repository",
+        "create-order.postgres-repository",
+        "create-order.postgres-db"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "create-order.http-client",
+          "to": "get-order",
+          "label": "GET /orders/:id with X-Tenant-Id header",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/server.ts",
+              "startLine": 11,
+              "endLine": 11,
+              "symbol": "app.use('/orders', ordersRouter(repository))",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 2,
+          "from": "get-order",
+          "to": "create-order.order-repository",
+          "label": "repository.findById(id)",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 24,
+              "endLine": 24,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 3,
+          "from": "create-order.order-repository",
+          "to": "create-order.in-memory-repository",
+          "label": "In-memory: return order by id",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/memory.ts",
+              "startLine": 10,
+              "endLine": 12,
+              "symbol": "InMemoryOrderRepository.findById",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 4,
+          "from": "create-order.order-repository",
+          "to": "create-order.postgres-repository",
+          "label": "Postgres implementation selected when ORDER_STORE=postgres",
+          "kind": "call",
+          "seamId": "create-order.order-repository-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 15,
+              "endLine": 15,
+              "symbol": "PostgresOrderRepository.findById",
+              "status": "inferred"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 5,
+          "from": "create-order.postgres-repository",
+          "to": "create-order.postgres-db",
+          "label": "SELECT body FROM orders WHERE id = $1",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/repositories/postgres.ts",
+              "startLine": 16,
+              "endLine": 16,
+              "symbol": "PostgresOrderRepository.findById",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 6,
+          "from": "get-order",
+          "to": "create-order.http-client",
+          "label": "404 {error:'order not found'} when no order",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 25,
+              "endLine": 28,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 7,
+          "from": "get-order",
+          "to": "create-order.http-client",
+          "label": "200 with the order as JSON",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "src/orders.ts",
+              "startLine": 29,
+              "endLine": 29,
+              "symbol": "ordersRouter",
+              "status": "unchecked"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e2",
+          "originStepId": "s3",
+          "transforms": [
+            {
+              "seamId": "create-order.order-repository-seam",
+              "into": "undefined (no order with this id)",
+              "evidence": [
+                {
+                  "file": "src/repositories/memory.ts",
+                  "startLine": 10,
+                  "endLine": 12,
+                  "symbol": "InMemoryOrderRepository.findById",
+                  "status": "unchecked"
+                },
+                {
+                  "file": "src/repositories/postgres.ts",
+                  "startLine": 16,
+                  "endLine": 17,
+                  "symbol": "PostgresOrderRepository.findById",
+                  "status": "unchecked"
+                }
+              ]
+            }
+          ],
+          "handler": {
+            "elementId": "get-order",
+            "evidence": [
+              {
+                "file": "src/orders.ts",
+                "startLine": 25,
+                "endLine": 28,
+                "symbol": "ordersRouter",
+                "status": "unchecked"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e3",
+          "originStepId": "s3",
+          "transforms": [],
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "unchanged"
+        }
+      ],
+      "seamIds": [
+        "create-order.order-repository-seam"
+      ]
+    }
+  ]
+}

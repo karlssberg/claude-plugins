@@ -1,0 +1,3 @@
+Scope orders by tenant
+
+Every order request must now carry an X-Tenant-Id header, and an order can only be read by its own tenant.

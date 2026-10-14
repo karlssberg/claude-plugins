@@ -1,0 +1,14 @@
+{
+  "name": "how",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@dagrejs/dagre": "3.1.1",
+    "esbuild": "0.24.0",
+    "typescript": "5.6.3"
+  }
+}

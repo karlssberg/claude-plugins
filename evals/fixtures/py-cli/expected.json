@@ -1,0 +1,7 @@
+{
+  "behaviours": [{ "entryPoint": "export" }, { "entryPoint": "sync" }],
+  "seams": [{ "name": "Exporter", "kind": "interface" }],
+  "incidental": ["README.md", "tests/test_registry.py"],
+  "contractChanged": ["Exporter"],
+  "swallowed": ["push"]
+}

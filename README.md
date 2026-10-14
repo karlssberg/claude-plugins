@@ -9,6 +9,12 @@ Claude Code plugins, skills and mods by karlssberg, published as a plugin market
 /plugin install <plugin-name>@karlssberg
 ```
 
+## Plugins
+
+| Plugin | Install | What it does |
+|---|---|---|
+| [how](plugins/how/README.md) | `/plugin install how@karlssberg` | Explains the Behaviours, Seams and error flows of a PR or codebase as diagrams |
+
 ## Layout
 
 ```
