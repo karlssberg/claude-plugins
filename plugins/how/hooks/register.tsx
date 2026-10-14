@@ -13,6 +13,7 @@ import {
   type BuildSubject,
   buildStatusOf,
   builderPrompt,
+  dropTwinsOfUnverified,
   formatLoadResult,
   fragmentPathFor,
   isFragmentPathFor,
@@ -146,7 +147,8 @@ async function openPane($: any): Promise<void> {
  */
 async function commit($: any, modelPath: string, model: BehaviourModel) {
   const verified = await verifyEvidence(model, await evidenceReader($))
-  const diffed = applyStepDiffs(verified.model)
+  // A head Step dropped for its Evidence takes its base twin with it, or the diff would call that twin removed.
+  const diffed = applyStepDiffs(dropTwinsOfUnverified(model, verified.model))
   await $.fs.write(modelPath, pretty(diffed))
   await update($, modelState, () => asStored({ path: modelPath, model: diffed }))
   return { model: diffed, dropped: verified.dropped }

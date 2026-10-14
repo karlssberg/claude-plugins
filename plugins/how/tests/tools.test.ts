@@ -204,6 +204,27 @@ describe('base Evidence (R25)', () => {
   })
 })
 
+describe('a dropped head Step and its base twin (R25a)', () => {
+  test('a head Step with bad Evidence leaves no removed twin, and a second open writes the identical model', async ($, on) => {
+    const m = model()
+    m.behaviours[0]!.steps.find(s => s.id === 's4')!.evidence = [
+      { file: 'src/gone.ts', startLine: 1, endLine: 2, symbol: 'gone', status: 'unchecked' },
+    ]
+    const { 'src/gone.ts': _gone, ...files } = filesOf(m)
+    const w = world(on, { files })
+    const r = await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(String(r.result)).toContain('s4: file missing: src/gone.ts')
+    const first = written(w)
+    const steps = first.behaviours[0]!.steps
+    expect(steps.some(s => s.id === 's4' || s.id === 'base:s4')).toBe(false)
+    expect(steps.filter(s => s.diff === 'removed')).toEqual([])
+    expect(first.baseBehaviours![0]!.steps.some(s => s.id === 's4')).toBe(false)
+    const firstText = w.writes.filter(x => x.path === MODEL_PATH).at(-1)!.text
+    await callTool($, 'open', { modelPath: MODEL_PATH })
+    expect(w.writes.filter(x => x.path === MODEL_PATH).at(-1)!.text).toBe(firstText)
+  })
+})
+
 describe('mcp__how__refresh', () => {
   test('refresh keeps navigation stack', async ($, on) => {
     const w = world(on, { files: filesOf(model()) })

@@ -9,19 +9,15 @@ const symbolsOf = (s: Step): string =>
     .sort()
     .join('|')
 
-export function markStepDiffs(
-  base: Behaviour | undefined,
+/**
+ * Pairs head Steps with base Steps: same endpoints and label first, then same endpoints, then same source and label
+ * (rerouted). Answers each paired head Step's base Step id and diff status.
+ */
+export function pairSteps(
+  base: Behaviour,
   head: Behaviour,
   elements: Record<string, Element>,
-): Behaviour {
-  if (!base) {
-    return {
-      ...head,
-      steps: head.steps.map(s => ({ ...s, diff: 'added' as DiffStatus })),
-      errorFlows: head.errorFlows.map(f => ({ ...f, diff: 'added' as DiffStatus })),
-    }
-  }
-
+): { matchOf: Map<string, string>; diffs: Map<string, DiffStatus> } {
   const pair = (s: Step) => `${nameOf(elements, s.from)}\u0000${nameOf(elements, s.to)}`
   const full = (s: Step) => `${pair(s)}\u0000${norm(s.label)}`
   const fromLabel = (s: Step) => `${nameOf(elements, s.from)}\u0000${norm(s.label)}`
@@ -46,6 +42,26 @@ export function markStepDiffs(
   claim(full, (h, b) => (symbolsOf(h) === symbolsOf(b) ? 'unchanged' : 'changed'))
   claim(pair, () => 'changed') // same endpoints, new label
   claim(fromLabel, () => 'changed') // rerouted
+  return { matchOf, diffs }
+}
+
+export function markStepDiffs(
+  base: Behaviour | undefined,
+  head: Behaviour,
+  elements: Record<string, Element>,
+): Behaviour {
+  if (!base) {
+    return {
+      ...head,
+      steps: head.steps.map(s => ({ ...s, diff: 'added' as DiffStatus })),
+      errorFlows: head.errorFlows.map(f => ({ ...f, diff: 'added' as DiffStatus })),
+    }
+  }
+
+  const { matchOf, diffs } = pairSteps(base, head, elements)
+  const usedBase = new Set(matchOf.values())
+  const byOrder = (a: Step, b: Step) => a.order - b.order
+  const baseSorted = [...base.steps].sort(byOrder)
 
   const steps: Step[] = head.steps.map(s => ({ ...s, diff: diffs.get(s.id) ?? 'added' }))
   const removed: Step[] = baseSorted
