@@ -114,6 +114,14 @@ describe('layoutBehaviourView', () => {
     expect(l.nodes.some(n => n.label !== '…')).toBe(true)
   })
 
+  test('a Step with no Evidence is drawn as Inferred', () => {
+    const m = load()
+    const b = JSON.parse(JSON.stringify(m.behaviours[0]!)) as typeof m.behaviours[0]
+    b.steps[0]!.evidence = []
+    const l = layoutBehaviourView(b, m, opts)
+    expect(l.edges.find(e => e.id === b.steps[0]!.id)!.style.isInferred).toBe(true)
+  })
+
   test('fits within maxCols', () => {
     const m = load()
     for (const maxCols of [40, 60, 120]) {

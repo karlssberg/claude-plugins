@@ -103,14 +103,122 @@ describe('verifyEvidence', () => {
     expect(r.dropped.find(d => d.id === 'a')?.reason).toBe('line range 900-910 past end of x.ts (20 lines)')
   })
 
-  test('removes invalid Evidence from non-element owners but keeps the owner', async () => {
-    const m = load()
-    const r = await verifyEvidence(m, async () => undefined)
-    const seam = r.model.seams['seam-inventory']
-    expect(seam).toBeDefined()
-    expect(seam.contract.evidence.length).toBe(0)
+  test('removes invalid Evidence from a Seam that keeps valid contract Evidence, and keeps the Seam', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
+    m.seams = {
+      sg: {
+        id: 'sg',
+        name: 'G',
+        kind: 'interface',
+        contract: { text: 'c', evidence: [ev('x.ts', 10, 10, 'needle'), ev('gone.ts', 1, 1, 'q')] },
+        enablingPoint: ev('gone.ts', 1, 1, 'q'),
+        isContractChanged: false,
+      },
+    }
+    const r = await verifyEvidence(m, async p => (p === 'x.ts' ? file20 : undefined))
+    const seam = r.model.seams.sg!
+    expect(seam.contract.evidence.length).toBe(1)
     expect(seam.enablingPoint).toBeUndefined()
-    expect(r.dropped.length).toBeGreaterThan(0)
+    expect(r.dropped.find(d => d.id === 'sg')?.reason).toBe('file missing: gone.ts')
+  })
+
+  test('a fabricated Seam is dropped with its Step references, transforms and Seam view, and the model re-parses', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
+    m.seams = {
+      sx: { id: 'sx', name: 'Fabricated', kind: 'network', contract: { text: 'c', evidence: [ev('x.ts', 10, 10, 'nope')] }, isContractChanged: true },
+      sy: { id: 'sy', name: 'Uncited', kind: 'network', contract: { text: 'c', evidence: [] }, isContractChanged: false },
+    }
+    const b = m.behaviours[0]!
+    b.seamIds = ['sx', 'sy']
+    b.steps[0]!.seamId = 'sx'
+    b.errorFlows = [
+      {
+        id: 'f1',
+        originStepId: 's1',
+        transforms: [{ seamId: 'sx', into: 'Err', evidence: [ev('x.ts', 10, 10, 'needle')] }],
+        isSwallowed: false,
+        isCatchAll: false,
+        diff: 'unchanged',
+      },
+    ]
+    m.seamViews = { sx: { subjectId: 'sx', status: 'built', nodes: [], edges: [] } }
+    const r = await verifyEvidence(m, async () => file20)
+    expect(r.model.seams).toEqual({})
+    const out = r.model.behaviours[0]!
+    expect(out.seamIds).toEqual([])
+    expect(out.steps).toHaveLength(1)
+    expect(out.steps[0]!.seamId).toBeUndefined()
+    expect('seamId' in out.steps[0]!).toBe(false)
+    expect(out.errorFlows[0]!.transforms).toEqual([])
+    expect(r.model.seamViews).toEqual({})
+    const ids = r.dropped.map(d => d.id)
+    expect(ids).toContain('sx')
+    expect(ids).toContain('sy')
+    expect(ids).toContain('f1')
+    expect(r.dropped.find(d => d.id === 'sy')?.reason).toBe('no evidence cited')
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
+
+  test('a FlowNode without valid Evidence is dropped with its edges', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
+    const node = (id: string, evidence: Evidence[]) => ({ id, label: id, kind: 'step' as const, diff: 'unchanged' as const, evidence })
+    m.seamViews = {
+      a: {
+        subjectId: 'a',
+        status: 'built',
+        nodes: [node('n1', [ev('x.ts', 10, 10, 'needle')]), node('n2', []), node('n3', [ev('x.ts', 10, 10, 'needle')]), node('n4', [ev('x.ts', 10, 10, 'nope')])],
+        edges: [
+          { from: 'n1', to: 'n2', isError: false },
+          { from: 'n2', to: 'n3', isError: false },
+          { from: 'n1', to: 'n3', isError: false },
+          { from: 'n3', to: 'n4', isError: true },
+        ],
+      },
+    }
+    const r = await verifyEvidence(m, async () => file20)
+    const view = r.model.seamViews.a!
+    expect(view.nodes.map(n => n.id)).toEqual(['n1', 'n3'])
+    expect(view.edges).toEqual([{ from: 'n1', to: 'n3', isError: false }])
+    expect(r.dropped.find(d => d.id === 'n2')?.reason).toBe('no evidence cited')
+    expect(r.dropped.find(d => d.id === 'n4')?.reason).toBe('symbol "nope" not found in x.ts')
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
+
+  test('an error-flow transform or handler without valid Evidence is dropped', async () => {
+    const m = tiny([ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
+    m.seams = { sg: { id: 'sg', name: 'G', kind: 'interface', contract: { text: 'c', evidence: [ev('x.ts', 10, 10, 'needle')] }, isContractChanged: false } }
+    m.behaviours[0]!.seamIds = ['sg']
+    m.behaviours[0]!.errorFlows = [
+      {
+        id: 'f1',
+        originStepId: 's1',
+        transforms: [
+          { seamId: 'sg', into: 'Uncited', evidence: [] },
+          { seamId: 'sg', into: 'Kept', evidence: [ev('x.ts', 10, 10, 'needle')] },
+          { seamId: 'sg', into: 'Wrong', evidence: [ev('x.ts', 10, 10, 'nope')] },
+        ],
+        handler: { elementId: 'b', evidence: [ev('x.ts', 10, 10, 'nope')] },
+        isSwallowed: false,
+        isCatchAll: false,
+        diff: 'unchanged',
+      },
+    ]
+    const r = await verifyEvidence(m, async () => file20)
+    const f = r.model.behaviours[0]!.errorFlows[0]!
+    expect(f.transforms.map(t => t.into)).toEqual(['Kept'])
+    expect(f.handler).toBeUndefined()
+    expect('handler' in f).toBe(false)
+    const reason = r.dropped.find(d => d.id === 'f1')?.reason ?? ''
+    expect(reason).toContain('transform into "Uncited": no evidence cited')
+    expect(reason).toContain('transform into "Wrong": symbol "nope" not found in x.ts')
+    expect(reason).toContain('handler "b": symbol "nope" not found in x.ts')
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
+  })
+
+  test('a pr-small model with no readable file keeps no Seam and still parses', async () => {
+    const r = await verifyEvidence(load(), async () => undefined)
+    expect(r.model.seams).toEqual({})
+    expect('model' in parseBehaviourModel(JSON.stringify(r.model))).toBe(true)
   })
 
   test('output still parses when the entry point Element is dropped', async () => {

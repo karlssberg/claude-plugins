@@ -105,6 +105,17 @@ describe('layoutGraph', () => {
 })
 
 describe('layoutSeamView', () => {
+  test('a flow node with no Evidence is drawn as Inferred', async () => {
+    const view = {
+      subjectId: 'x',
+      status: 'built' as const,
+      nodes: [{ id: 'n1', label: 'n1', kind: 'step' as const, diff: 'unchanged' as const, evidence: [] }],
+      edges: [],
+    }
+    const l = await layoutSeamView(view, { maxCols: 80, showErrors: true })
+    expect(l.nodes.find(n => n.id === 'n1')!.style.isInferred).toBe(true)
+  })
+
   test('hides isError edges and error-only nodes when showErrors is false', async () => {
     const view = load().seamViews['order-service']!
     const hidden = await layoutSeamView(view, { maxCols: 80, showErrors: false })

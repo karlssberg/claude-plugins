@@ -15,7 +15,8 @@ export function truncate(text: string, width: number): string {
   return chars.slice(0, Math.max(0, width - 1)).join('') + '…'
 }
 
-const isInferred = (evidence: Evidence[]) => evidence.length > 0 && evidence.every(e => e.status === 'inferred')
+/** No Evidence at all counts as Inferred: nothing unevidenced is drawn as proven. */
+const isInferred = (evidence: Evidence[]) => evidence.every(e => e.status === 'inferred')
 
 type Row =
   | { kind: 'step'; id: string; from: string; to: string; label: string; diff: DiffStatus; inferred: boolean; seam: boolean; stepIds: string[] }

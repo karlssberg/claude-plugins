@@ -36,12 +36,37 @@ export function baseOnlyElementIds(model: BehaviourModel): Set<string> {
 }
 
 /**
+ * Seams only base code uses: named by `baseBehaviours` or by removed Steps and error flows, and by nothing live at
+ * head (a head Behaviour's seamIds, a Step or error flow that is not removed, a Seam view). Their Contract cites base
+ * code, so it is never checked against head files.
+ */
+export function baseOnlySeamIds(model: BehaviourModel): Set<string> {
+  const live = new Set<string>(Object.keys(model.seamViews))
+  const base = new Set<string>()
+  for (const v of Object.values(model.seamViews)) live.add(v.subjectId)
+  const refs = (b: Behaviour, into: (removed: boolean) => Set<string>) => {
+    for (const s of b.steps) if (s.seamId !== undefined) into(isRemoved(s)).add(s.seamId)
+    for (const f of b.errorFlows) for (const t of f.transforms) into(isRemoved(f)).add(t.seamId)
+  }
+  for (const b of model.behaviours) {
+    b.seamIds.forEach(id => live.add(id))
+    refs(b, removed => (removed ? base : live))
+  }
+  for (const b of model.baseBehaviours ?? []) {
+    b.seamIds.forEach(id => base.add(id))
+    refs(b, () => base)
+  }
+  return new Set([...base].filter(id => !live.has(id) && id in model.seams))
+}
+
+/**
  * Verifies head content only: `baseBehaviours`, removed Steps and error flows, and base-only Elements keep the
  * Evidence status their producer set and are never dropped for it (their code may be gone at head). They still lose
  * Steps that touch a head Element the check dropped, so the model stays valid.
  */
 export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile): Promise<EvidenceCheckResult> {
   const baseOnly = baseOnlyElementIds(model)
+  const baseOnlySeams = baseOnlySeamIds(model)
   const cache = new Map<string, Promise<string[] | undefined>>()
   const lines = (path: string): Promise<string[] | undefined> => {
     let p = cache.get(path)
@@ -110,10 +135,21 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
     if (el.parentId !== undefined && droppedElements.has(el.parentId)) elements[el.id] = { ...el, parentId: undefined }
   }
 
-  // Seams
+  // Seams: one left with no valid Contract Evidence is dropped, and every reference to it with it.
   const seams: BehaviourModel['seams'] = {}
+  const droppedSeams = new Set<string>()
   for (const [id, seam] of Object.entries(model.seams)) {
-    const contract = await checkList(seam.contract.evidence, id, true)
+    if (baseOnlySeams.has(id)) {
+      seams[id] = seam
+      continue
+    }
+    const contract = await checkList(seam.contract.evidence, id, false)
+    if (contract.kept.length === 0) {
+      droppedSeams.add(id)
+      report(id, noEvidence(contract.reasons))
+      continue
+    }
+    contract.reasons.forEach(r => report(id, r))
     let enablingPoint: Evidence | undefined
     if (seam.enablingPoint) {
       const r = await check(seam.enablingPoint)
@@ -128,14 +164,24 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   // Seam views
   const seamViews: BehaviourModel['seamViews'] = {}
   for (const [key, view] of Object.entries(model.seamViews)) {
-    const gone = [key, view.subjectId].find(id => droppedElements.has(id))
+    const gone = [key, view.subjectId].find(id => droppedElements.has(id) || droppedSeams.has(id))
     if (gone !== undefined) {
-      report(key, `names dropped element "${gone}"`)
+      report(key, `names dropped ${droppedSeams.has(gone) ? 'Seam' : 'element'} "${gone}"`)
       continue
     }
+    // A flow node left with no valid Evidence is dropped, with every edge that touches it.
     const nodes = []
-    for (const n of view.nodes) nodes.push({ ...n, evidence: (await checkList(n.evidence, n.id, true)).kept })
-    seamViews[key] = { ...view, nodes }
+    for (const n of view.nodes) {
+      const { kept, reasons } = await checkList(n.evidence, n.id, false)
+      if (kept.length === 0) report(n.id, noEvidence(reasons))
+      else {
+        reasons.forEach(r => report(n.id, r))
+        nodes.push({ ...n, evidence: kept })
+      }
+    }
+    const nodeIds = new Set(nodes.map(n => n.id))
+    const edges = view.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+    seamViews[key] = { ...view, nodes, edges }
   }
 
   // Intent mismatches
@@ -145,6 +191,11 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
   }
 
   // Behaviours (head and base)
+  const withoutDroppedSeam = (s: Step): Step => {
+    if (s.seamId === undefined || !droppedSeams.has(s.seamId)) return s
+    const { seamId: _gone, ...rest } = s
+    return rest
+  }
   const checkBehaviour = async (b: Behaviour, isBase: boolean): Promise<Behaviour | undefined> => {
     if (droppedElements.has(b.entryPointId)) {
       report(b.id, `entry point "${b.entryPointId}" was dropped`)
@@ -159,15 +210,16 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
         report(s.id, `touches dropped element "${gone}"`)
         continue
       }
+      const step = withoutDroppedSeam(s)
       if (isBase || isRemoved(s)) {
-        steps.push(s)
+        steps.push(step)
         continue
       }
       const { kept, reasons } = await checkList(s.evidence, s.id, false)
       if (kept.length === 0) {
         droppedSteps.add(s.id)
         report(s.id, noEvidence(reasons))
-      } else steps.push({ ...s, evidence: kept })
+      } else steps.push({ ...step, evidence: kept })
     }
     const errorFlows = []
     for (const f of b.errorFlows) {
@@ -175,30 +227,57 @@ export async function verifyEvidence(model: BehaviourModel, readFile: ReadFile):
         report(f.id, `origin step "${f.originStepId}" was dropped`)
         continue
       }
+      // A transform across a dropped Seam goes, in head and base alike, or the model would not re-parse.
+      const across = f.transforms.filter(t => {
+        if (!droppedSeams.has(t.seamId)) return true
+        report(f.id, `transform into "${t.into}" crosses dropped Seam "${t.seamId}"`)
+        return false
+      })
       if (isBase || isRemoved(f)) {
         const gone = f.handler !== undefined && droppedElements.has(f.handler.elementId)
         if (gone) report(f.id, `handler element "${f.handler!.elementId}" was dropped`)
-        const kept = { ...f }
+        const kept = { ...f, transforms: across }
         if (gone) delete (kept as { handler?: unknown }).handler
         errorFlows.push(kept)
         continue
       }
+      // A transform or handler left with no valid Evidence is dropped: an unevidenced owner is never drawn.
       const transforms = []
-      for (const t of f.transforms) {
-        transforms.push({ ...t, evidence: (await checkList(t.evidence, f.id, true)).kept })
+      for (const t of across) {
+        const { kept, reasons } = await checkList(t.evidence, f.id, false)
+        if (kept.length === 0) report(f.id, `transform into "${t.into}": ${noEvidence(reasons)}`)
+        else {
+          reasons.forEach(r => report(f.id, r))
+          transforms.push({ ...t, evidence: kept })
+        }
       }
       let handler = f.handler
       if (handler) {
         if (droppedElements.has(handler.elementId)) {
           report(f.id, `handler element "${handler.elementId}" was dropped`)
           handler = undefined
-        } else handler = { ...handler, evidence: (await checkList(handler.evidence, f.id, true)).kept }
+        } else {
+          const { kept, reasons } = await checkList(handler.evidence, f.id, false)
+          if (kept.length === 0) {
+            report(f.id, `handler "${handler.elementId}": ${noEvidence(reasons)}`)
+            handler = undefined
+          } else {
+            reasons.forEach(r => report(f.id, r))
+            handler = { ...handler, evidence: kept }
+          }
+        }
       }
       const next = { ...f, transforms, handler }
       if (handler === undefined) delete (next as { handler?: unknown }).handler
       errorFlows.push(next)
     }
-    return { ...b, elementIds: b.elementIds.filter(id => !droppedElements.has(id)), steps, errorFlows }
+    return {
+      ...b,
+      elementIds: b.elementIds.filter(id => !droppedElements.has(id)),
+      seamIds: b.seamIds.filter(id => !droppedSeams.has(id)),
+      steps,
+      errorFlows,
+    }
   }
   const behaviours = []
   for (const b of model.behaviours) {

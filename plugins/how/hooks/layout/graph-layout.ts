@@ -165,7 +165,8 @@ export async function layoutGraph(
   return { cols: Math.min(opts.maxCols, width), rows: Math.max(rows, edgeRows), nodes, edges }
 }
 
-const allInferred = (evidence: Evidence[]) => evidence.length > 0 && evidence.every(e => e.status === 'inferred')
+/** No Evidence at all counts as Inferred: nothing unevidenced is drawn as proven. */
+const allInferred = (evidence: Evidence[]) => evidence.every(e => e.status === 'inferred')
 
 export async function layoutSeamView(view: SeamView, opts: { maxCols: number; showErrors: boolean }): Promise<Layout> {
   let edges = view.edges.map((e, i) => ({ ...e, id: `e${i}` }))

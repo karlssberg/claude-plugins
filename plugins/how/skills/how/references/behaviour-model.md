@@ -58,15 +58,15 @@ type BehaviourModel = {
 - `id`: unique key; must equal its key in `seams`.
 - `name`: what the Seam joins.
 - `kind`: `interface`, `module-api`, `network`, `message` or `binding`.
-- `contract`: the Contract text plus Evidence for it.
+- `contract`: the Contract text plus Evidence for it. A Seam without valid Contract Evidence is dropped: Steps lose its `seamId`, Behaviours its id in `seamIds`, and the error-flow transforms and Seam views that name it go with it.
 - `enablingPoint`: Evidence for where the Seam is wired (the Enabling point).
 - `isContractChanged`: true when the Contract differs from base.
 
 ### ErrorFlow
 - `id`: unique within its Behaviour.
 - `originStepId`: id of the Step where the error arises (must exist in the Behaviour).
-- `transforms`: each Seam crossing that rewrites the error, with the resulting `into` type.
-- `handler`: the Element that finally handles it, with Evidence.
+- `transforms`: each Seam crossing that rewrites the error, with the resulting `into` type and Evidence. A transform without valid Evidence is dropped.
+- `handler`: the Element that finally handles it, with Evidence. A handler without valid Evidence is removed.
 - `isSwallowed`: true when the error is silently dropped.
 - `isCatchAll`: true when handled by a catch-all.
 - `diff`: change status against base.
@@ -87,7 +87,7 @@ type BehaviourModel = {
 ### FlowNode and SeamView
 - `subjectId`: the Element id or Seam id the Seam view explains.
 - `status`: build state of the view.
-- `nodes`: `id` unique within the view, `label`, `kind` (`step`, `decision`, `error`, `return`), `diff`, `evidence`.
+- `nodes`: `id` unique within the view, `label`, `kind` (`step`, `decision`, `error`, `return`), `diff`, `evidence`. A node without valid Evidence is dropped with its edges.
 - `edges`: `from` and `to` name node ids; `isError` marks error paths; `label` is optional.
 
 ### BehaviourModel
