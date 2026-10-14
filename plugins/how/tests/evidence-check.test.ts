@@ -20,7 +20,7 @@ const file20 = Array.from({ length: 20 }, (_, i) => (i === 9 ? 'function needle(
 
 function tiny(a: Evidence[], b: Evidence[], stepEv: Evidence[]): BehaviourModel {
   const m = load()
-  const base = m.behaviours[0]
+  const base = m.behaviours[0]!
   return {
     ...m,
     intentMismatches: [],
@@ -52,7 +52,7 @@ describe('verifyEvidence', () => {
     const m = tiny([ev('x.ts', 10, 11, 'needle')], [ev('x.ts', 12, 12, 'needle')], [ev('x.ts', 8, 9, 'needle')])
     const r = await verifyEvidence(m, async () => file20)
     expect(r.dropped.length).toBe(0)
-    expect(r.model.elements.a.evidence[0].status).toBe('verified')
+    expect(r.model.elements.a?.evidence[0].status).toBe('verified')
     expect(r.model.elements.b.evidence[0].status).toBe('verified') // within +-3
     expect(r.model.behaviours[0].steps[0].evidence[0].status).toBe('verified')
     expect(m.elements.a.evidence[0].status).toBe('unchecked') // input not mutated
@@ -61,7 +61,7 @@ describe('verifyEvidence', () => {
   test('marks inferred when symbol is elsewhere in the file', async () => {
     const m = tiny([ev('x.ts', 1, 2, 'needle')], [ev('x.ts', 10, 10, 'needle')], [ev('x.ts', 10, 10, 'needle')])
     const r = await verifyEvidence(m, async () => file20)
-    expect(r.model.elements.a.evidence[0].status).toBe('inferred')
+    expect(r.model.elements.a?.evidence[0].status).toBe('inferred')
     expect(r.dropped.length).toBe(0)
   })
 
