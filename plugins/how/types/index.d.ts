@@ -10,7 +10,7 @@ declare module 'claude-code' {
         [agentId: string]: {
           subject: { kind: 'behaviour'; behaviourId: string } | { kind: 'seam'; subjectId: string; behaviourId: string }
           modelPath: string
-          fragmentPath: string
+          fragmentName: string
         }
       }
       snippets: { [key: string]: { source: string; startLine: number; more?: number } | { error: string } }

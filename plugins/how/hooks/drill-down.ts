@@ -9,36 +9,65 @@ import type { Navigation, ViewRef } from './panel/navigation'
 
 export type BuildSubject = Extract<ViewRef, { kind: 'behaviour' | 'seam' }>
 /** A spawned `how:behaviour-builder` waiting for its refresh, keyed by agentId in the `pending` atom. */
-export type PendingBuild = { subject: BuildSubject; modelPath: string; fragmentPath: string }
+export type PendingBuild = { subject: BuildSubject; modelPath: string; fragmentName: string }
 export type PendingBuilds = Record<string, PendingBuild>
 
 export const BUILDER_AGENT = 'how:behaviour-builder'
 export const BUILD_TIMEOUT_MS = 10 * 60 * 1000
 const MAX_DROPPED_LISTED = 10
 
-/** The Behaviour model cache file: `<…>/how/<head sha>.json`. */
+/** A Behaviour model file: `<…>/how/<head sha>.json`, the cache in `.git` or the producer's `$TMPDIR` staging copy. */
 const MODEL_PATH = /\/how\/[0-9a-fA-F]{7,64}\.json$/
 export const isModelPath = (p: unknown): p is string => typeof p === 'string' && MODEL_PATH.test(p)
 
-const stemOf = (modelPath: string) => modelPath.slice(0, -'.json'.length)
+const segments = (p: string) => p.split('/')
+const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
+/** The model's hex stem: `<sha>` of `<…>/how/<sha>.json`. */
+const shaOf = (modelPath: string) => baseName(modelPath).slice(0, -'.json'.length)
+
+/**
+ * The cache folder `<git common dir>/how`: it ends in `/how`, sits right under a folder named `.git` or ending in
+ * `.git` (a bare repository), and has no `..` segment.
+ */
+export function isCacheDir(p: unknown): p is string {
+  if (typeof p !== 'string' || !p.endsWith('/how')) return false
+  const parts = segments(p)
+  const parent = parts[parts.length - 2] ?? ''
+  return !parts.includes('..') && parent.endsWith('.git')
+}
+
+/** Where the mod caches the model: `<cacheDir>/<sha>.json`, `<sha>` the hex stem of `modelPath`. */
+export const cachePathFor = (cacheDir: string, modelPath: string): string => `${cacheDir}/${shaOf(modelPath)}.json`
 
 /** One subject per key: a Seam view is keyed by its subject alone, as `seamViews` is. */
 export const subjectKey = (s: BuildSubject): string =>
   s.kind === 'behaviour' ? `behaviour:${s.behaviourId}` : `seam:${s.subjectId}`
 
-/** Where the builder writes: beside the model, its stem, then the subject. */
-export function fragmentPathFor(modelPath: string, subject: BuildSubject): string {
-  const safe = subjectKey(subject).replace(/[^A-Za-z0-9_-]/g, '_')
-  return `${stemOf(modelPath)}.${safe}.fragment.json`
+const safeKey = (s: BuildSubject) => subjectKey(s).replace(/[^A-Za-z0-9_-]/g, '_')
+
+/** The fragment's file name: `<model sha>.<sanitized subject key>.fragment.json`. The builder picks the folder. */
+export const fragmentNameFor = (modelPath: string, subject: BuildSubject): string =>
+  `${shaOf(modelPath)}.${safeKey(subject)}.fragment.json`
+
+/** The pending subject `fragmentPath` is named for, if any (see isFragmentPathFor). */
+export function fragmentSubjectOf(
+  fragmentPath: unknown,
+  modelPath: string,
+  pending: readonly BuildSubject[],
+): BuildSubject | undefined {
+  if (typeof fragmentPath !== 'string') return undefined
+  const parts = segments(fragmentPath)
+  if (parts.includes('..') || parts[parts.length - 2] !== 'how') return undefined
+  const name = parts[parts.length - 1]
+  return pending.find(s => fragmentNameFor(modelPath, s) === name)
 }
 
-/** True when `fragmentPath` sits beside `modelPath`, shares its stem and ends in `.fragment.json`. */
-export function isFragmentPathFor(fragmentPath: unknown, modelPath: string): fragmentPath is string {
-  if (typeof fragmentPath !== 'string' || !fragmentPath.endsWith('.fragment.json')) return false
-  const stem = stemOf(modelPath)
-  if (!fragmentPath.startsWith(`${stem}.`)) return false
-  const rest = fragmentPath.slice(stem.length + 1)
-  return rest.length > '.fragment.json'.length && !rest.includes('/') && !rest.includes('\\')
+/**
+ * True when `fragmentPath` is `<…>/how/<model sha>.<key>.fragment.json` with no `..` segment, `<key>` the sanitized
+ * key of a pending subject. The folder is the builder's own (its `$TMPDIR/how`), so it need not be the model's.
+ */
+export function isFragmentPathFor(fragmentPath: unknown, modelPath: string, pending: readonly BuildSubject[]): fragmentPath is string {
+  return fragmentSubjectOf(fragmentPath, modelPath, pending) !== undefined
 }
 
 export function subjectName(model: BehaviourModel | undefined, s: BuildSubject): string {
@@ -220,7 +249,8 @@ export type BuilderPromptInput = {
   modelPath: string
   subject: BuildSubject
   name: string
-  fragmentPath: string
+  /** The fragment's file name (fragmentNameFor); the builder writes it under its own `$TMPDIR/how`. */
+  fragmentName: string
   /** The reference doc's absolute path; left out when the plugin root is unknown. */
   referencePath?: string
 }
@@ -244,7 +274,8 @@ export function builderPrompt(p: BuilderPromptInput): string {
     s.kind === 'behaviour'
       ? `"behaviour": the complete Behaviour with id ${JSON.stringify(s.behaviourId)} (keep its id, name, entryPointId and rank) with its steps, errorFlows, elementIds and seamIds filled in`
       : `"seamView": the SeamView with subjectId ${JSON.stringify(s.subjectId)}, its nodes and edges filled in`
-  const refresh = JSON.stringify({ modelPath: p.modelPath, fragmentPath: p.fragmentPath })
+  const fragment = `$TMPDIR/how/${p.fragmentName}`
+  const refresh = JSON.stringify({ modelPath: p.modelPath, fragmentPath: `<TMPDIR>/how/${p.fragmentName}` })
   return [
     `Build ${what} for the Behaviour model at ${p.modelPath}.`,
     '',
@@ -252,11 +283,13 @@ export function builderPrompt(p: BuilderPromptInput): string {
     ...(p.referencePath === undefined ? [] : [`Behaviour model format (read it first and follow it exactly): ${p.referencePath}`]),
     `Read the Behaviour model for context (its scope, Elements, Seams and the subject's current entry); never edit it.`,
     '',
-    `Write ONLY this fragment file, and no other file: ${p.fragmentPath}`,
+    `Write ONLY this fragment file, and no other file: ${fragment}`,
+    '`$TMPDIR` is your own temp folder, never inside .git: run `printenv TMPDIR` for its absolute path <TMPDIR> (use /tmp when it prints nothing) and write <TMPDIR>/how/' +
+      `${p.fragmentName} (Write creates the how folder).`,
     'It is one JSON object { "behaviour"?, "seamView"?, "elements"?, "seams"? } holding:',
     `- ${shape};`,
     '- "elements" and "seams": only the NEW Elements and Seams it references (ids already in the model are kept as they are).',
     '',
-    `Then call mcp__how__refresh with ${refresh}. If it returns an error, fix the fragment and call it again.`,
+    `Then call mcp__how__refresh with ${refresh}, <TMPDIR> replaced by that absolute path. If it returns an error, fix the fragment and call it again.`,
   ].join('\n')
 }

@@ -5,13 +5,16 @@ description: Explains what code does as evidence-backed Behaviour diagrams in th
 
 # how
 
-Build a Behaviour model of a PR or of the code in focus, write it to the cache, and open it in the how panel. The reader reviews Behaviours, not files, so the model must be **grounded**: every Element, Step, Seam and Intent mismatch cites Evidence you read in the code. What you cannot cite stays out of the model; reasoned links are marked Inferred.
+Build a Behaviour model of a PR or of the code in focus, write it to a staging file, and open it in the how panel, which caches it. The reader reviews Behaviours, not files, so the model must be **grounded**: every Element, Step, Seam and Intent mismatch cites Evidence you read in the code. What you cannot cite stays out of the model; reasoned links are marked Inferred.
 
 The model format is [references/behaviour-model.md](references/behaviour-model.md). Read it before step 5 and follow it exactly. Use the glossary words in every name and label: Behaviour, Entry point, Critical path, Seam, Contract, Enabling point, Evidence, Incidental change, Intent mismatch.
 
 ## 1. Resolve the target
 
-Run `git rev-parse --path-format=absolute --git-common-dir` and `git rev-parse HEAD`. The model path is `<git-common-dir>/how/<head sha>.json` (full 40-hex sha; create the folder with `mkdir -p`).
+Run `git rev-parse --path-format=absolute --git-common-dir`, `git rev-parse HEAD` and `printenv TMPDIR` (use `/tmp` when it prints nothing). Two paths follow, each with the full 40-hex head sha:
+
+- The **cache path** `<git-common-dir>/how/<head sha>.json`, with the **cache folder** `<git-common-dir>/how`. The how panel writes it. You only read it: `.git` is a protected path, so never write, `mkdir` or edit anything inside `.git`.
+- The **staging path** `<TMPDIR>/how/<head sha>.json`, the absolute path you write a new model to. Create its folder with `mkdir -p "$TMPDIR/how"`.
 
 Read the arguments (`$ARGUMENTS`; when the skill fired from a plain-language ask, the PR, path or topic the user named):
 
@@ -32,9 +35,9 @@ The Evidence check reads the files in this checkout, so the head being explained
 
 ## 2. Check the cache
 
-When the model file exists, its `scope` equals the resolved one (`mode`, `target`, `baseSha`, `focus`), and `git status --porcelain --untracked-files=no` prints nothing, call `mcp__how__open` with `{ "modelPath": <model path> }`, report as in step 9, and stop. The panel settles any Behaviour left `building`.
+When the file at the cache path exists, its `scope` equals the resolved one (`mode`, `target`, `baseSha`, `focus`), and `git status --porcelain --untracked-files=no` prints nothing, call `mcp__how__open` with `{ "modelPath": <cache path> }`, report as in step 9, and stop. The panel settles any Behaviour left `building`.
 
-Otherwise build a new model; it replaces the file.
+Otherwise build a new model; once opened, it replaces the cached one.
 
 ### The base worktree (PR mode)
 
@@ -119,8 +122,8 @@ Set the stated claims against the observed Behaviour changes and record each Int
 
 ## 9. Write, open and report
 
-Write the whole model as one JSON object to the model path, with `version: 1` and every Evidence `status: "unchecked"` (or `"inferred"` for a link you reasoned rather than read). Call `mcp__how__open` with `{ "modelPath": <absolute model path> }`. When it answers an error, fix the file and call it again, at most twice; if it still fails, set the Behaviour the error names to `status: "failed"` with its skeleton and Entry point Evidence, and open once more.
+Write the whole model as one JSON object to the staging path, with `version: 1` and every Evidence `status: "unchecked"` (or `"inferred"` for a link you reasoned rather than read). Call `mcp__how__open` with `{ "modelPath": <staging path>, "cacheDir": <cache folder> }`, both absolute. The panel verifies the model and writes it to the cache path; you never write inside `.git`. When it answers an error, fix the staging file and call it again, at most twice; if it still fails, set the Behaviour the error names to `status: "failed"` with its skeleton and Entry point Evidence, and open once more.
 
-When `mcp__how__open` is not in your tools at all, the how plugin could not register its tools (most often a sandbox that forbids binding a local port; the plugin logs the reason as "how: tools unavailable — …"). Tell the user so in one line, give the absolute model path you wrote, and say that `/how` with the same arguments opens it from the cache once the tools are available (for a sandbox, `sandbox.network.allowLocalBinding: true`).
+When `mcp__how__open` is not in your tools at all, the how plugin could not register its tools (most often a sandbox that forbids binding a local port; the plugin logs the reason as "how: tools unavailable — …"). Tell the user so in one line, give the absolute staging path you wrote the model to (it was not cached: only the panel writes the cache), and say that `/how` with the same arguments builds and opens it once the tools are available (for a sandbox, `sandbox.network.allowLocalBinding: true`).
 
 The tool answers `<n> Behaviours, <d> elements dropped: …`. Reply to the user in at most 3 lines: the mode (and target), the Behaviour count, the dropped-element summary as the tool gave it, and that the how panel is open.

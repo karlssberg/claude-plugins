@@ -13,12 +13,15 @@ import {
   type BuildSubject,
   buildStatusOf,
   builderPrompt,
+  cachePathFor,
   dropTwinsOfUnverified,
   formatLoadResult,
-  fragmentPathFor,
-  isFragmentPathFor,
+  fragmentNameFor,
+  fragmentSubjectOf,
+  isCacheDir,
   isModelPath,
   mergeFragment,
+  type PendingBuild,
   type PendingBuilds,
   resolvableStack,
   settleOrphanBuilds,
@@ -89,7 +92,10 @@ export async function openEvidence($: any, ownerId: string, index: number): Prom
 type ToolAnswer = { result: string } | { deny: string }
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const pretty = (m: BehaviourModel) => JSON.stringify(m, null, 2)
-const BAD_MODEL_PATH = 'modelPath must be the Behaviour model cache file, <git common dir>/how/<head sha>.json'
+const BAD_MODEL_PATH = 'modelPath must be a Behaviour model file, <folder>/how/<head sha>.json'
+const BAD_CACHE_DIR = 'cacheDir must be the cache folder <git common dir>/how (under a folder named .git or ending in .git)'
+const BAD_FRAGMENT_PATH =
+  'fragmentPath must be <folder>/how/<model sha>.<subject>.fragment.json, named for a build the panel is waiting on, with no ..'
 
 // The single writer of the Behaviour model: every load, merge and status change runs here one at a time, writing the
 // file and then the `model` atom. Timers of pending builds sit beside it (neither survives a reload, nor do timers).
@@ -160,8 +166,11 @@ async function failLoad($: any, modelPath: string, error: string): Promise<ToolA
   return { deny: error }
 }
 
-/** `mcp__how__open` (keepNav false) and `mcp__how__refresh` without a fragment (keepNav true). */
-async function loadModel($: any, modelPath: string, keepNav: boolean): Promise<ToolAnswer> {
+/**
+ * `mcp__how__open` (keepNav false) and `mcp__how__refresh` without a fragment (keepNav true). Reads `modelPath` and
+ * writes the verified model to `writePath` (the cache file when open names a cacheDir), which the atom then stores.
+ */
+async function loadModel($: any, modelPath: string, keepNav: boolean, writePath = modelPath): Promise<ToolAnswer> {
   const loaded = await serial(async () => {
     let text: string
     try {
@@ -172,7 +181,7 @@ async function loadModel($: any, modelPath: string, keepNav: boolean): Promise<T
     const parsed = parseBehaviourModel(text)
     if ('error' in parsed) return { error: parsed.error }
     const pendingKeys = new Set(Object.values(await read($, pendingState)).map(p => subjectKey(p.subject)))
-    return commit($, modelPath, settleOrphanBuilds(parsed.model, pendingKeys))
+    return commit($, writePath, settleOrphanBuilds(parsed.model, pendingKeys))
   }).catch(err => ({ error: `Could not load the Behaviour model at ${modelPath}: ${errText(err)}` }))
   if ('error' in loaded) return failLoad($, modelPath, loaded.error)
   await update($, navState, (nv: Navigation) => (keepNav ? resolvableStack(nv, loaded.model) : initialNavigation()))
@@ -215,8 +224,7 @@ async function failPending($: any, agentId: string): Promise<void> {
 }
 
 /** `mcp__how__refresh` with a fragment: merge it into the file model, verify, write; a bad merge fails the subject. */
-async function mergeBuild($: any, modelPath: string, fragmentPath: string): Promise<ToolAnswer> {
-  const pending = Object.values(await read($, pendingState)).find(p => p.fragmentPath === fragmentPath)
+async function mergeBuild($: any, modelPath: string, fragmentPath: string, pending: PendingBuild): Promise<ToolAnswer> {
   const out = await serial(async (): Promise<ToolAnswer> => {
     let modelText: string
     let fragmentText: string
@@ -230,23 +238,23 @@ async function mergeBuild($: any, modelPath: string, fragmentPath: string): Prom
     try {
       fragmentText = String(await $.fs.read(fragmentPath))
     } catch (err) {
-      if (pending) await clearPending($, subjectKey(pending.subject))
-      if (pending) await writeStatus($, pending.subject, 'failed')
+      await clearPending($, subjectKey(pending.subject))
+      await writeStatus($, pending.subject, 'failed')
       return { deny: `Could not read the fragment at ${fragmentPath}: ${errText(err)}` }
     }
     const merged = mergeFragment(parsed.model, fragmentText)
-    const subject = pending?.subject ?? merged.subject
-    if (subject) await clearPending($, subjectKey(subject))
-    if (pending && merged.subject && subjectKey(merged.subject) !== subjectKey(pending.subject)) {
+    const subject = pending.subject
+    await clearPending($, subjectKey(subject))
+    if (merged.subject && subjectKey(merged.subject) !== subjectKey(pending.subject)) {
       await writeStatus($, pending.subject, 'failed')
       return { deny: `fragment builds ${subjectKey(merged.subject)} but ${fragmentPath} is for ${subjectKey(pending.subject)}` }
     }
     if ('error' in merged) {
-      if (subject) await writeStatus($, subject, 'failed')
+      await writeStatus($, subject, 'failed')
       return { deny: merged.error }
     }
     const verified = await commit($, modelPath, merged.model)
-    // $.fs has no delete: the fragment stays beside the model (the next build of the subject overwrites it).
+    // $.fs has no delete: the fragment stays in the builder's $TMPDIR/how (the next build of the subject overwrites it).
     return { result: `${formatLoadResult(verified.model, verified.dropped)} (merged ${fragmentPath})` }
   }).catch(err => ({ deny: `Could not merge ${fragmentPath}: ${errText(err)}` }))
   const { model } = await readModel($)
@@ -284,7 +292,7 @@ async function startBuild($: any, subject: BuildSubject, key: string): Promise<v
   if (buildStatusOf(model, subject) === 'building' || buildStatusOf(model, subject) === 'built') return
   await setStatus($, subject, 'building')
   const name = subjectName(model, subject)
-  const fragmentPath = fragmentPathFor(path, subject)
+  const fragmentName = fragmentNameFor(path, subject)
   let root: string | undefined
   try {
     root = typeof $.plugin.root === 'string' && $.plugin.root !== '' ? $.plugin.root : undefined
@@ -292,7 +300,7 @@ async function startBuild($: any, subject: BuildSubject, key: string): Promise<v
     root = undefined
   }
   const referencePath = root === undefined ? undefined : `${root}/skills/how/references/behaviour-model.md`
-  const prompt = builderPrompt({ modelPath: path, subject, name, fragmentPath, referencePath })
+  const prompt = builderPrompt({ modelPath: path, subject, name, fragmentName, referencePath })
   let spawned: { agentId?: string; deny?: string }
   try {
     spawned = await $.agent.spawn({ subagentType: BUILDER_AGENT, description: spawnDescription(name), prompt })
@@ -304,7 +312,7 @@ async function startBuild($: any, subject: BuildSubject, key: string): Promise<v
     await setStatus($, subject, 'failed')
     return
   }
-  await update($, pendingState, (p: PendingBuilds) => ({ ...p, [agentId]: { subject, modelPath: path, fragmentPath } }))
+  await update($, pendingState, (p: PendingBuilds) => ({ ...p, [agentId]: { subject, modelPath: path, fragmentName } }))
   try {
     buildTimers.set(agentId, $.clock.after(BUILD_TIMEOUT_MS, () => void failPending($, agentId)))
   } catch {
@@ -314,7 +322,9 @@ async function startBuild($: any, subject: BuildSubject, key: string): Promise<v
 
 const MODEL_PATH_SCHEMA = {
   type: 'string',
-  description: 'Absolute path of the Behaviour model cache file: <git common dir>/how/<head sha>.json',
+  description:
+    'Absolute path of a Behaviour model file, <folder>/how/<head sha>.json: the cache file <git common dir>/how/<head sha>.json, ' +
+    'or for open the staging file the model was just written to, $TMPDIR/how/<head sha>.json',
 }
 
 export const register: Register = on => {
@@ -324,17 +334,31 @@ export const register: Register = on => {
         $.tool.register({
           name: 'open',
           description:
-            'Load a Behaviour model into the `how` panel and open it. Call after writing the model to its cache file. ' +
-            'Re-verifies every Evidence citation against the code, drops what does not check out, writes the verified ' +
-            'model back and answers "<n> Behaviours, <d> elements dropped: <id: reason; …>": report what was dropped.',
-          inputSchema: { type: 'object', properties: { modelPath: MODEL_PATH_SCHEMA }, required: ['modelPath'] },
+            'Load a Behaviour model into the `how` panel and open it. Call with the cache file, or after writing a new ' +
+            'model to $TMPDIR/how/<head sha>.json with cacheDir <git common dir>/how. Re-verifies every Evidence ' +
+            'citation against the code, drops what does not check out, writes the verified model to the cache (with ' +
+            'cacheDir, <cacheDir>/<head sha>.json; otherwise back to modelPath) and answers ' +
+            '"<n> Behaviours, <d> elements dropped: <id: reason; …>": report what was dropped.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              modelPath: MODEL_PATH_SCHEMA,
+              cacheDir: {
+                type: 'string',
+                description:
+                  'Absolute path of the cache folder, <git common dir>/how (optional). The panel writes the verified ' +
+                  'model there; the session never writes inside .git.',
+              },
+            },
+            required: ['modelPath'],
+          },
           isDeferred: false,
         }),
         $.tool.register({
           name: 'refresh',
           description:
             'Reload the Behaviour model in the `how` panel, keeping its navigation. With fragmentPath (a ' +
-            '`<model stem>.<subject>.fragment.json` beside the model, written by how:behaviour-builder), merge that ' +
+            '`$TMPDIR/how/<model sha>.<subject>.fragment.json` written by how:behaviour-builder), merge that ' +
             'built Behaviour or Seam view into the model, mark it built and re-verify Evidence; an invalid fragment ' +
             'marks the build failed and answers why.',
           inputSchema: {
@@ -364,18 +388,22 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__how__open' }, async ($, e) => {
-    const { modelPath } = e as { modelPath?: unknown }
-    return isModelPath(modelPath) ? loadModel($, modelPath, false) : { deny: BAD_MODEL_PATH }
+    const { modelPath, cacheDir } = e as { modelPath?: unknown; cacheDir?: unknown }
+    if (!isModelPath(modelPath)) return { deny: BAD_MODEL_PATH }
+    if (cacheDir === undefined) return loadModel($, modelPath, false)
+    if (!isCacheDir(cacheDir)) return { deny: BAD_CACHE_DIR }
+    return loadModel($, modelPath, false, cachePathFor(cacheDir, modelPath))
   }).catch(() => ({ deny: 'how: loading the Behaviour model failed' }))
 
   on('tool.call', { tool: 'mcp__how__refresh' }, async ($, e) => {
     const { modelPath, fragmentPath } = e as { modelPath?: unknown; fragmentPath?: unknown }
     if (!isModelPath(modelPath)) return { deny: BAD_MODEL_PATH }
     if (fragmentPath === undefined) return loadModel($, modelPath, true)
-    if (!isFragmentPathFor(fragmentPath, modelPath)) {
-      return { deny: 'fragmentPath must sit beside modelPath, share its stem and end in .fragment.json' }
-    }
-    return mergeBuild($, modelPath, fragmentPath)
+    const pending = Object.values(await read($, pendingState))
+    const subject = fragmentSubjectOf(fragmentPath, modelPath, pending.map(p => p.subject))
+    const build = subject && pending.find(p => subjectKey(p.subject) === subjectKey(subject))
+    if (typeof fragmentPath !== 'string' || build === undefined) return { deny: BAD_FRAGMENT_PATH }
+    return mergeBuild($, modelPath, fragmentPath, build)
   }).catch(() => ({ deny: 'how: refreshing the Behaviour model failed' }))
 
   // A builder whose turn ends without its refresh has failed.

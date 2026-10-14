@@ -24,15 +24,19 @@ git add -A
 git -c user.name=how-eval -c user.email=how-eval@example.invalid commit -qm "$(cat "$fixture/pr-message.txt")"
 
 # Headless runs answer no permission prompts: allow only what the skill and its builders use, and deny the rest
-# (dontAsk) rather than wait. Shell access is read-only git plus the base worktree and the cache folder; `git -C`
-# is allowed per read-only subcommand, and `-c` (git runs a program it names) is denied outright. Write is
-# scoped through its Edit rule to the model folder, .git/how. NOTE: .git is a protected path, which dontAsk
-# denies whatever the allow rules say, so this run is expected to fail to write the model (see README).
+# (dontAsk) rather than wait. Shell access is read-only git plus the base worktree, `printenv TMPDIR` and
+# `mkdir -p` for the staging folder; `git -C` is allowed per read-only subcommand, and `-c` (git runs a program it
+# names) is denied outright. Write is scoped through its Edit rules to the staging folder $TMPDIR/how, spelled as
+# given and with symlinks resolved (an absolute path rule starts with //). The session never writes inside .git:
+# mcp__how__open writes the cache, <git common dir>/how/<sha>.json, through the plugin's own file access.
+tmp="${TMPDIR:-/tmp}"
+tmp="${tmp%/}"
+tmp_real=$(cd "$tmp" && pwd -P)
 start=$(date +%s)
 status=0
 claude -p "/how HEAD~1..HEAD" --plugin-dir "$plugin" --max-budget-usd 5 --output-format json \
   --permission-mode dontAsk \
-  --allowedTools Skill Read Grep Glob LSP Agent "Edit(./.git/how/**)" \
+  --allowedTools Skill Read Grep Glob LSP Agent "Edit(/$tmp/how/**)" "Edit(/$tmp_real/how/**)" "Bash(printenv TMPDIR)" \
   "Bash(git log:*)" "Bash(git show:*)" "Bash(git diff:*)" "Bash(git blame:*)" "Bash(git rev-parse:*)" \
   "Bash(git merge-base:*)" "Bash(git worktree:*)" "Bash(git status:*)" "Bash(git symbolic-ref:*)" \
   "Bash(git -C * rev-parse:*)" "Bash(git -C * log:*)" "Bash(git -C * show:*)" "Bash(git -C * diff:*)" \
@@ -42,11 +46,18 @@ claude -p "/how HEAD~1..HEAD" --plugin-dir "$plugin" --max-budget-usd 5 --output
 end=$(date +%s)
 echo "wall time: $((end - start))s; claude exit $status; output: $out.out.json"
 
-model="$(git rev-parse --path-format=absolute --git-common-dir)/how/$(git rev-parse HEAD).json"
+sha=$(git rev-parse HEAD)
+model="$(git rev-parse --path-format=absolute --git-common-dir)/how/$sha.json"
 if [ ! -f "$model" ]; then
-  echo "no model at $model; the CLI answered:" >&2
-  cat "$out.out.json" >&2
-  exit 1
+  # No cache: mcp__how__open never ran. The unverified model, if written, is in the staging folder.
+  staged="$tmp/how/$sha.json"
+  if [ ! -f "$staged" ]; then
+    echo "no model at $model or $staged; the CLI answered:" >&2
+    cat "$out.out.json" >&2
+    exit 1
+  fi
+  echo "model not cached (mcp__how__open did not run); staged, unverified: $staged. Run evals/open-fixture.sh $name $n." >&2
+  model=$staged
 fi
 cp "$model" "$out.model.json"
 echo "model: $model"

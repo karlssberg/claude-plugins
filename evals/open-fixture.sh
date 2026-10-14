@@ -12,9 +12,18 @@ plugin=$(cd "$evals/../plugins/how" && pwd -P)
 work="${TMPDIR:-/tmp}/how-eval-$name-$n"
 out="$evals/results/$name.run$n"
 cd "$work"
-model="$(git rev-parse --path-format=absolute --git-common-dir)/how/$(git rev-parse HEAD).json"
+sha=$(git rev-parse HEAD)
+cache_dir="$(git rev-parse --path-format=absolute --git-common-dir)/how"
+model="$cache_dir/$sha.json"
+# Open the cache when there is one; otherwise the producer's staging file, which open caches to $model.
+if [ -f "$model" ]; then
+  input="{\"modelPath\": \"$model\"}"
+else
+  tmp="${TMPDIR:-/tmp}"
+  input="{\"modelPath\": \"${tmp%/}/how/$sha.json\", \"cacheDir\": \"$cache_dir\"}"
+fi
 
-claude -p "Call the tool mcp__how__open with {\"modelPath\": \"$model\"}. Then reply with only its result text, verbatim, or the exact error it returned." \
+claude -p "Call the tool mcp__how__open with $input. Then reply with only its result text, verbatim, or the exact error it returned." \
   --plugin-dir "$plugin" --model haiku --max-budget-usd 0.5 --output-format json \
   --permission-mode dontAsk --allowedTools mcp__how__open \
   >"$out.open.out.json"

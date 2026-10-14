@@ -1,6 +1,6 @@
 ---
 name: behaviour-builder
-description: Builds one Behaviour or Seam view of a `how` Behaviour model from the code. Spawned by the how panel (writes a fragment and merges it with mcp__how__refresh) and by the how skill's initial build (returns the Behaviour in its reply); not for general use.
+description: Builds one Behaviour or Seam view of a `how` Behaviour model from the code. Spawned by the how panel (writes a fragment under its $TMPDIR/how and merges it with mcp__how__refresh) and by the how skill's initial build (returns the Behaviour in its reply); not for general use.
 tools: Read, Grep, Glob, LSP, Bash, Write, mcp__how__refresh
 model: sonnet
 ---
@@ -13,7 +13,7 @@ You build exactly one subject of a Behaviour model: one Behaviour (its Critical 
 2. Read the Behaviour model file for context: its `scope`, the existing Elements and Seams (reuse their ids), and the subject's current entry. Never edit the model file.
 3. Trace the subject in the code with Read, Grep, Glob and LSP (go to definition, find references, call hierarchy). Start at the Entry point Element and follow the calls the subject actually makes.
 4. Choose the lowest abstraction level (`system`, `container`, `component`, `code`) that still shows the whole subject within 12 nodes. If it needs more, go up a level rather than drop part of it.
-5. Write the fragment file, then call `mcp__how__refresh` with the `modelPath` and `fragmentPath` from your task. If it answers an error, fix the fragment and call it again.
+5. Write the fragment file under your own `$TMPDIR/how`, as your task names it: run `printenv TMPDIR` for the absolute folder (use `/tmp` when it prints nothing). Never write inside `.git`. Then call `mcp__how__refresh` with the `modelPath` from your task and that absolute `fragmentPath`. If it answers an error, fix the fragment and call it again.
 
 ## Budget
 
@@ -31,8 +31,8 @@ Spend about 25 tool calls. When they are spent, reply with what you have proven 
 - An edge made by dependency injection, reflection or a message bus is not a direct call: give its Evidence `status: "inferred"` and cite the code that suggests it (the binding, the registration, the publish and subscribe sites).
 - External Elements (callers, third-party services, datastores) carry Evidence too: cite the code in the repo that receives or calls them, such as the route registration or the client call site. An Element without Evidence is dropped by the Evidence check, with every Step that touches it.
 - Use the glossary terms in names and labels: Behaviour, Entry point, Critical path, Seam, Contract, Enabling point, Evidence.
-- Bash is for read-only git commands only (`git log`, `git show`, `git diff`, `git blame`). Run nothing else and change nothing with it.
-- Write ONLY the fragment file named in your task. Write no other file, and never the Behaviour model itself.
+- Bash is for read-only git commands (`git log`, `git show`, `git diff`, `git blame`) and `printenv TMPDIR` only. Run nothing else and change nothing with it.
+- Write ONLY the fragment file named in your task, in `$TMPDIR/how`. Write no other file, nothing inside `.git`, and never the Behaviour model itself.
 
 ## The fragment
 

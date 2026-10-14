@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 import {
   applyStepDiffs,
+  cachePathFor,
   formatLoadResult,
-  fragmentPathFor,
+  fragmentNameFor,
+  isCacheDir,
   isFragmentPathFor,
   isModelPath,
   resolvableStack,
 } from '../hooks/drill-down'
 import type { BehaviourModel } from '../hooks/model/behaviour-model'
 import { initialNavigation } from '../hooks/panel/navigation'
-import { prSmallJson } from './fixtures/models'
+import { codebaseSmallJson, prSmallJson } from './fixtures/models'
 import { CWD, MODEL_PATH, callTool, clone, load, mountPane, sourcesFor, world, written } from './fixtures/world'
 
 const model = (): BehaviourModel => clone(load(prSmallJson))
@@ -26,14 +28,36 @@ describe('model paths', () => {
     expect(isModelPath('/r/how/abcdef1.json.bak')).toBe(false)
     expect(isModelPath(42)).toBe(false)
   })
-  test('a fragment sits beside the model with its stem and ends .fragment.json', () => {
-    const f = fragmentPathFor(MODEL_PATH, { kind: 'seam', subjectId: 'src/a.ts:Foo', behaviourId: 'b' })
-    expect(f).toBe(`${CWD}/.git/how/9be2d41c7a85.seam_src_a_ts_Foo.fragment.json`)
-    expect(isFragmentPathFor(f, MODEL_PATH)).toBe(true)
-    expect(isFragmentPathFor(`${CWD}/.git/how/9be2d41c7a85.x.json`, MODEL_PATH)).toBe(false)
-    expect(isFragmentPathFor(`${CWD}/.git/how/9be2d41c7a85.a/../../x.fragment.json`, MODEL_PATH)).toBe(false)
-    expect(isFragmentPathFor(`${CWD}/.git/how/other.x.fragment.json`, MODEL_PATH)).toBe(false)
-    expect(isFragmentPathFor(`${CWD}/.git/how/9be2d41c7a85..fragment.json`, MODEL_PATH)).toBe(false)
+  test('a fragment is named <model sha>.<subject>.fragment.json', () => {
+    expect(fragmentNameFor(MODEL_PATH, { kind: 'seam', subjectId: 'src/a.ts:Foo', behaviourId: 'b' })).toBe(
+      '9be2d41c7a85.seam_src_a_ts_Foo.fragment.json',
+    )
+  })
+  test('a fragment path is any <…>/how/<model sha>.<pending subject>.fragment.json without ..', () => {
+    const seam = { kind: 'seam' as const, subjectId: 'src/a.ts:Foo', behaviourId: 'b' }
+    const pending = [seam]
+    const name = fragmentNameFor(MODEL_PATH, seam)
+    expect(isFragmentPathFor(`/var/folders/x/T/how/${name}`, MODEL_PATH, pending)).toBe(true)
+    expect(isFragmentPathFor(`${CWD}/.git/how/${name}`, MODEL_PATH, pending)).toBe(true)
+    // parent folder must be `how`
+    expect(isFragmentPathFor(`/var/folders/x/T/${name}`, MODEL_PATH, pending)).toBe(false)
+    expect(isFragmentPathFor(`/tmp/hows/${name}`, MODEL_PATH, pending)).toBe(false)
+    // no .. segment anywhere
+    expect(isFragmentPathFor(`/tmp/how/../how/${name}`, MODEL_PATH, pending)).toBe(false)
+    // wrong sha, wrong or not pending subject, wrong suffix
+    expect(isFragmentPathFor(`/tmp/how/deadbeef1.seam_src_a_ts_Foo.fragment.json`, MODEL_PATH, pending)).toBe(false)
+    expect(isFragmentPathFor(`/tmp/how/9be2d41c7a85.seam_other.fragment.json`, MODEL_PATH, pending)).toBe(false)
+    expect(isFragmentPathFor(`/tmp/how/${name}`, MODEL_PATH, [])).toBe(false)
+    expect(isFragmentPathFor(`/tmp/how/9be2d41c7a85.seam_src_a_ts_Foo.json`, MODEL_PATH, pending)).toBe(false)
+    expect(isFragmentPathFor(42, MODEL_PATH, pending)).toBe(false)
+  })
+  test('cacheDir must be <…/.git or …x.git>/how', () => {
+    expect(isCacheDir(`${CWD}/.git/how`)).toBe(true)
+    expect(isCacheDir('/srv/repo.git/how')).toBe(true)
+    for (const bad of [`${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/how/`, `${CWD}/.git/../how`, `${CWD}/git/how`, 'how', '', 42, undefined]) {
+      expect(isCacheDir(bad)).toBe(false)
+    }
+    expect(cachePathFor(`${CWD}/.git/how`, '/var/folders/x/T/how/9be2d41c7a85.json')).toBe(MODEL_PATH)
   })
 })
 
@@ -119,6 +143,37 @@ describe('mcp__how__open', () => {
       expect(rr.deny).toMatch(/modelPath must/)
     }
     expect(w.reads).toEqual([])
+    expect(w.opened).toEqual([])
+  })
+
+  test('open with cacheDir reads the staging file and writes the verified model to the cache', async ($, on) => {
+    const STAGING = '/var/folders/x/T/how/9be2d41c7a85.json'
+    const m = load(codebaseSmallJson) // b-refund is pending
+    const w = world(on, { files: { ...sourcesFor(m), [STAGING]: JSON.stringify(m) } })
+    const r = await callTool($, 'open', { modelPath: STAGING, cacheDir: `${CWD}/.git/how` })
+    expect(r.deny).toBeUndefined()
+    expect(r.result).toMatch(/^3 Behaviours, 0 elements dropped/)
+    expect(w.writes.map(x => x.path)).toEqual([MODEL_PATH])
+    expect(written(w).version).toBe(1)
+    // The stored path is the cache: a build writes its status there and names it to the builder.
+    const ui = await mountPane($)
+    await ui.press({ key: 'behaviour-b-refund' })
+    await ui.press({ key: 'build' })
+    expect(w.spawns[0]!.prompt).toContain(`Behaviour model at ${MODEL_PATH}.`)
+    expect(w.writes.every(x => x.path === MODEL_PATH)).toBe(true)
+    expect(written(w).behaviours.find(b => b.id === 'b-refund')!.status).toBe('building')
+    await ui.unmount()
+  })
+
+  test('a bad cacheDir is rejected without reading or writing', async ($, on) => {
+    const STAGING = '/var/folders/x/T/how/9be2d41c7a85.json'
+    const w = world(on, { files: { ...filesOf(model()), [STAGING]: JSON.stringify(model()) } })
+    for (const cacheDir of [`${CWD}/how`, `${CWD}/.git/hooks`, `${CWD}/.git/../how`, '/tmp/how', 42]) {
+      const r = await callTool($, 'open', { modelPath: STAGING, cacheDir })
+      expect(r.deny).toMatch(/cacheDir must/)
+    }
+    expect(w.reads).toEqual([])
+    expect(w.writes).toEqual([])
     expect(w.opened).toEqual([])
   })
 
@@ -262,6 +317,8 @@ describe('mcp__how__refresh', () => {
       expect(s.inputSchema.required).toContain('modelPath')
     }
     expect(specs.find(s => s.name === 'refresh').inputSchema.properties.fragmentPath).toBeDefined()
+    expect(specs.find(s => s.name === 'open').inputSchema.properties.cacheDir).toBeDefined()
+    expect(specs.find(s => s.name === 'open').inputSchema.required).toEqual(['modelPath'])
   })
 
   test('a refused tool registration is logged and toasted, not swallowed', async ($, on) => {
