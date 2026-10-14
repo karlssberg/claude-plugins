@@ -31,13 +31,18 @@ export function foldToBudget(
   const order = [...byGroup.entries()].sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1))
   let drawn = elementIds.length
   const groups: Fold['groups'] = []
-  const foldedKeys = new Set<string>()
   const nameOf = (key: string) => (key === '\u0000other' ? 'Other' : (elements[key]?.name ?? key))
-  const idOf = (key: string) => (key === '\u0000other' ? 'group:other' : `group:${key}`)
+  // The Other sentinel gets a collision-free id: a real parent Element may itself have the id "other".
+  const parentIds = new Set(byGroup.keys())
+  const otherId = (taken: Set<string>) => {
+    let id = 'group:other'
+    for (let n = 2; parentIds.has(id.slice(6)) || taken.has(id); n++) id = `group:other:${n}`
+    return id
+  }
+  const idOf = (key: string) => (key === '\u0000other' ? otherId(new Set()) : `group:${key}`)
   for (const [key, members] of order) {
     if (drawn <= limit) break
     if (members.length < 2) continue
-    foldedKeys.add(key)
     drawn -= members.length - 1
     groups.push({ id: idOf(key), label: `${nameOf(key)} (${members.length})`, memberIds: members })
   }
@@ -65,11 +70,10 @@ export function foldToBudget(
         kept = kept.filter(g => g !== item.group)
       }
     }
-    // An existing parent group may not be named "other"; Other is a distinct id.
-    const rest = kept.filter(g => g.id !== 'group:other')
+    const rest = kept
     if (other.size) {
       const members = elementIds.filter(id => other.has(id))
-      rest.push({ id: 'group:other', label: `Other (${members.length})`, memberIds: members })
+      rest.push({ id: otherId(new Set(rest.map(g => g.id))), label: `Other (${members.length})`, memberIds: members })
     }
     groups.length = 0
     groups.push(...rest)

@@ -87,4 +87,17 @@ describe('foldToBudget', () => {
     expect(r.groups.every(g => g.label.endsWith(`(${g.memberIds.length})`))).toBe(true)
     expect(foldToBudget(ids, elements, opts([ids[0]!]))).toEqual(r)
   })
+
+  test('a parent with id "other" does not collide with the Other group', async () => {
+    const { elements, ids } = build(30, 15)
+    elements['p0'] = { ...elements['p0']!, id: 'other' }
+    elements['other'] = elements['p0']!
+    delete elements['p0']
+    for (const id of ids) if (elements[id]!.parentId === 'p0') elements[id] = { ...elements[id]!, parentId: 'other' }
+    const r = foldToBudget(ids, elements, opts([ids[1]!]))
+    expect(r.visibleIds.length + r.groups.length).toBeLessThanOrEqual(12)
+    const all = [...r.visibleIds, ...r.groups.flatMap(g => g.memberIds)].sort()
+    expect(all).toEqual([...ids].sort())
+    expect(new Set(r.groups.map(g => g.id)).size).toBe(r.groups.length)
+  })
 })
