@@ -4,7 +4,7 @@ The research pointed to a self-contained HTML page or Artifact for interactive d
 
 ## Consequences
 
-- There is no DOM, so Mermaid is out. Diagrams are laid out in the hooks module, using bundled elkjs plus our own sequence layout, and emitted as SVG strings.
+- There is no DOM, so Mermaid is out. Diagrams are laid out in the hooks module, using vendored dagre (elkjs exceeds the hooks loader's 1 MiB module limit) plus our own sequence layout, and emitted as SVG strings.
 - `Svg` is a leaf with no per-node clicks. Nodes become clickable through absolutely positioned Buttons laid over our own layout coordinates, falling back to a clickable legend if that proves unreliable.
 - The terminal has no `Svg`, so it gets a text/box fallback. The desktop app and VS Code are the primary surfaces.
 - "Open in editor" links work reliably only on the terminal, so code evidence is shown inline in the panel.
