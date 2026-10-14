@@ -1,5 +1,5 @@
 // Step-level diff of a head Behaviour against its base. Pure; never mutates inputs.
-import type { Behaviour, DiffStatus, Element, ErrorFlow, Step } from './behaviour-model'
+import type { Behaviour, BehaviourModel, DiffStatus, Element, ErrorFlow, Step } from './behaviour-model'
 
 const norm = (s: string): string => s.replace(/\s+/g, ' ').trim().toLowerCase()
 const nameOf = (els: Record<string, Element>, id: string): string => norm(els[id]?.name ?? id)
@@ -8,6 +8,36 @@ const symbolsOf = (s: Step): string =>
     .map(e => e.symbol)
     .sort()
     .join('|')
+
+/** The base Behaviour paired with `h`: the one whose Entry point Element has the same name. */
+export function baseTwinOf(model: BehaviourModel, h: { entryPointId: string }): Behaviour | undefined {
+  const name = model.elements[h.entryPointId]?.name
+  return name === undefined ? undefined : model.baseBehaviours?.find(b => model.elements[b.entryPointId]?.name === name)
+}
+
+/** The Entry point is new or changed in the PR: its Element's Evidence carries a hunk. */
+export const isEntryPointChanged = (model: BehaviourModel, b: Behaviour): boolean =>
+  model.elements[b.entryPointId]?.evidence.some(e => e.hunk !== undefined) ?? false
+
+/**
+ * A built PR Behaviour that could not be compared with base: the model has base Behaviours, none is its twin, and
+ * its Entry point is not new or changed. A pending Behaviour built on demand ends up so, as no base was built for it.
+ */
+export const isUncompared = (model: BehaviourModel, b: Behaviour): boolean =>
+  model.scope.mode === 'pr' &&
+  model.baseBehaviours !== undefined &&
+  b.status === 'built' &&
+  baseTwinOf(model, b) === undefined &&
+  !isEntryPointChanged(model, b)
+
+/** Every Step and error flow of `head` marked `unchanged`. */
+export function markUnchanged(head: Behaviour): Behaviour {
+  return {
+    ...head,
+    steps: head.steps.map(s => ({ ...s, diff: 'unchanged' as DiffStatus })),
+    errorFlows: head.errorFlows.map(f => ({ ...f, diff: 'unchanged' as DiffStatus })),
+  }
+}
 
 /**
  * Pairs head Steps with base Steps: same endpoints and label first, then same endpoints, then same source and label

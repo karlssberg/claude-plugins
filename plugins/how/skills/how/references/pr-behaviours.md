@@ -44,6 +44,6 @@ Order the Behaviours by risk: every `contract-change` Behaviour first, then `err
 
 A built head Behaviour is matched to its base by its Entry point Element's `name`, and its Steps by from/to Element names and label. So a base builder gets the head Behaviour and its hunks, re-traces at base only the Steps whose Evidence overlaps a hunk, and copies every other Step verbatim (ids, Element ids, labels, Evidence); only then do unchanged Steps pair up as unchanged.
 
-- An Entry point added by the PR has no base: build no base Behaviour for it, and its Steps show as added.
+- An Entry point added by the PR has no base: build no base Behaviour for it, and put the hunk that adds it in the `hunk` of its Entry point Element's Evidence, so its Steps show as added. A Behaviour with no base and no such hunk is shown as not compared with base, its Steps unchanged.
 - Elements that exist only at base get ids prefixed `base-` and join `elements`, so the removed Steps in `baseBehaviours` resolve.
 - Base Evidence `file` paths are repo-relative, as at head; never write the worktree path.

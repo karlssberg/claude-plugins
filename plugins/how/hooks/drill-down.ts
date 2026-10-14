@@ -1,7 +1,7 @@
 // Model loading and lazy drill-down: the pure half. Validating paths, diffing against base, merging a builder's
 // fragment, build statuses, the builder's prompt and the tool's reply. No `$` here: register.tsx does the I/O
 // (the engine follows `$` only into functions of its own file).
-import { markStepDiffs, pairSteps } from './model/behaviour-diff'
+import { baseTwinOf, isUncompared, markStepDiffs, markUnchanged, pairSteps } from './model/behaviour-diff'
 import { type BehaviourModel, type BuildStatus, parseBehaviourModel } from './model/behaviour-model'
 import type { Dropped } from './model/evidence-check'
 import { resolveEvidenceOwner } from './panel/evidence-owner'
@@ -145,14 +145,11 @@ export function settleOrphanBuilds(model: BehaviourModel, pendingKeys: ReadonlyS
 /**
  * PR mode: each built head Behaviour diffed Step by Step against the base Behaviour whose Entry point Element has
  * the same name. Steps and error flows a previous diff added as removed (`base:` ids) are dropped first, so loading
- * a model this wrote is a no-op. Without `baseBehaviours` the producer's diffs stand.
+ * a model this wrote is a no-op. Without `baseBehaviours` the producer's diffs stand. A Behaviour with no base twin
+ * is all added when its Entry point is new or changed, and otherwise all unchanged: it was built on demand, with no
+ * base to compare (isUncompared).
  */
 const isOld = (x: { id: string; diff: string }) => x.diff === 'removed' && x.id.startsWith('base:')
-/** The base Behaviour paired with `h`: the one whose Entry point Element has the same name. */
-const baseOf = (model: BehaviourModel, h: { entryPointId: string }) => {
-  const name = model.elements[h.entryPointId]?.name
-  return name === undefined ? undefined : model.baseBehaviours?.find(b => model.elements[b.entryPointId]?.name === name)
-}
 
 /**
  * After the Evidence check: every head Step the check dropped for its own Evidence (its Elements survived) takes
@@ -164,7 +161,7 @@ export function dropTwinsOfUnverified(before: BehaviourModel, after: BehaviourMo
   const drop = new Map<string, Set<string>>() // base Behaviour id -> base Step ids to remove
   for (const h of before.behaviours) {
     if (h.status !== 'built') continue
-    const base = baseOf(before, h)
+    const base = baseTwinOf(before, h)
     const kept = after.behaviours.find(b => b.id === h.id)
     if (!base || !kept) continue
     const head = { ...h, steps: h.steps.filter(s => !isOld(s)) }
@@ -188,15 +185,12 @@ export function dropTwinsOfUnverified(before: BehaviourModel, after: BehaviourMo
 }
 
 export function applyStepDiffs(model: BehaviourModel): BehaviourModel {
-  const bases = model.baseBehaviours
-  if (!bases) return model
-  const nameOf = (id: string) => model.elements[id]?.name
+  if (!model.baseBehaviours) return model
   const behaviours = model.behaviours.map(h => {
     if (h.status !== 'built') return h
     const head = { ...h, steps: h.steps.filter(s => !isOld(s)), errorFlows: h.errorFlows.filter(f => !isOld(f)) }
-    const name = nameOf(h.entryPointId)
-    const base = name === undefined ? undefined : bases.find(b => nameOf(b.entryPointId) === name)
-    return markStepDiffs(base, head, model.elements)
+    if (isUncompared(model, head)) return markUnchanged(head)
+    return markStepDiffs(baseTwinOf(model, head), head, model.elements)
   })
   return { ...model, behaviours }
 }

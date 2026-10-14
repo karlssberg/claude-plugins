@@ -270,6 +270,26 @@ describe('Behaviour view and Seam view', () => {
     await ui.unmount()
   })
 
+  test('a PR Behaviour with no base twin says it was not compared with base', async ($, on) => {
+    const ui = await mount($, on, 'terminal', load(prSmallJson), ['behaviour-b-cancel'])
+    const note = await ui.find({ key: 'compare-note' })
+    expect(note?.text).toBe('not compared with base (built on demand)')
+    expect((await ui.find({ type: 'Text', text: 'not compared with base (built on demand)' }))?.props.dimColor).toBe(true)
+    await ui.unmount()
+    const placed = await mount($, undefined, 'terminal', load(prSmallJson), ['behaviour-b-place'])
+    expect(await placed.find({ key: 'compare-note' })).toBeUndefined()
+    await placed.unmount()
+    // A new Entry point (its Evidence carries a hunk) is compared: its Steps are added.
+    const m = load(prSmallJson)
+    m.elements['order-service']!.evidence[0]!.hunk = '@@ -0,0 +1,3 @@'
+    const added = await mount($, undefined, 'terminal', m, ['behaviour-b-cancel'])
+    expect(await added.find({ key: 'compare-note' })).toBeUndefined()
+    await added.unmount()
+    const codebase = await mount($, undefined, 'terminal', load(codebaseSmallJson), ['behaviour-b-place'])
+    expect(await codebase.find({ key: 'compare-note' })).toBeUndefined()
+    await codebase.unmount()
+  })
+
   test('terminal step lines read from → to : label', async ($, on) => {
     const ui = await mount($, on, 'terminal', load(prSmallJson), behaviourPath())
     expect(await ui.find({ type: 'Text', text: 'Client → OrdersController : POST /orders' })).toBeDefined()

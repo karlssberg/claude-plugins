@@ -95,6 +95,19 @@ describe('pure helpers', () => {
     expect(once.behaviours[0]!.steps.filter(s => s.diff === 'removed').map(s => s.id)).toEqual(['base:s6'])
     expect(applyStepDiffs(once)).toEqual(once)
   })
+  test('PR mode: a built Behaviour with no base twin keeps its Steps unchanged unless its Entry point changed', () => {
+    const m = model() // b-cancel has no base twin
+    const cancel = (x: BehaviourModel) => x.behaviours.find(b => b.id === 'b-cancel')!
+    cancel(m).steps[0]!.diff = 'changed'
+    cancel(m).errorFlows = [{ id: 'f', originStepId: cancel(m).steps[0]!.id, transforms: [], isSwallowed: true, isCatchAll: false, diff: 'added' }]
+    const kept = cancel(applyStepDiffs(m))
+    expect(kept.steps.map(s => s.diff)).toEqual(['unchanged', 'unchanged', 'unchanged'])
+    expect(kept.errorFlows.map(f => f.diff)).toEqual(['unchanged'])
+    m.elements['order-service']!.evidence[0]!.hunk = '@@ -0,0 +1,3 @@'
+    const fresh = cancel(applyStepDiffs(m))
+    expect(fresh.steps.map(s => s.diff)).toEqual(['added', 'added', 'added'])
+    expect(fresh.errorFlows.map(f => f.diff)).toEqual(['added'])
+  })
   test('resolvableStack cuts at the first view that no longer resolves', () => {
     const m = model()
     const nav = {

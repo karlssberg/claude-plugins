@@ -73,7 +73,7 @@ Every Evidence `symbol` you write is a name that appears on its cited lines or w
 
 Order the Behaviours: PR mode by risk (Contract change, then error-handling change, then fan-in), codebase mode by score. The first 7 get `status: "built"` and are built in step 6.
 
-Every later Behaviour gets `status: "pending"`, its `id`, `name`, `entryPointId`, `rank` and `risks`, `level: "component"`, `elementIds: [<its Entry point>]`, and empty `steps`, `errorFlows` and `seamIds`. Its only Evidence is the Entry point Element's. The panel builds it when the reader opens it. A pending PR Behaviour built that way has no base, so all its Steps show as added.
+Every later Behaviour gets `status: "pending"`, its `id`, `name`, `entryPointId`, `rank` and `risks`, `level: "component"`, `elementIds: [<its Entry point>]`, and empty `steps`, `errorFlows` and `seamIds`. Its only Evidence is the Entry point Element's. The panel builds it when the reader opens it. A pending PR Behaviour built that way has no base to compare with: its Steps show as unchanged, and its Behaviour view says it was not compared with base, unless its Entry point Element's Evidence carries a hunk (the Entry point is new or changed), in which case they show as added.
 
 `seamViews` starts as `{}`: every Seam view is built when the reader opens it.
 

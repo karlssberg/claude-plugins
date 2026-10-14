@@ -4,6 +4,7 @@ import { CELL_PX, type Layout, type LayoutEdge, type LayoutNode, OVERLAY_MODE } 
 import { layoutSeamView } from '../layout/graph-layout'
 import { layoutBehaviourView } from '../layout/sequence-layout'
 import { toSvg } from '../layout/svg'
+import { isUncompared } from '../model/behaviour-diff'
 import type { Behaviour, BehaviourModel, BuildStatus, DiffStatus, Evidence } from '../model/behaviour-model'
 import { SVG_MAX_CHARS } from './behaviour-map'
 import { renderDiagramText } from './diagram-text'
@@ -11,6 +12,9 @@ import { type Navigation, push, toggleErrors, toggleGroup, type ViewRef } from '
 import type { PaneEnv } from './pane'
 import { errorFlowEvidence, ownerId } from './evidence-owner'
 import { BUTTON_PAD, truncate, wrap } from './text'
+
+/** The Behaviour view's note on a PR Behaviour that has no base twin to be compared with (isUncompared). */
+const UNCOMPARED = 'not compared with base (built on demand)'
 
 export type DiagramRef = Extract<ViewRef, { kind: 'behaviour' | 'seam' }>
 /** A node without `onPress` (a Seam-view flow node with no Evidence) is drawn as plain text. */
@@ -152,6 +156,15 @@ export async function renderDiagramView(
     status = model.seamViews[ref.subjectId]?.status ?? (seam || element ? 'pending' : 'missing')
   } else {
     status = behaviour ? behaviour.status : 'missing'
+    if (behaviour && isUncompared(model, behaviour)) {
+      header = (
+        <Box key="compare-note" flexDirection="column">
+          {wrap(UNCOMPARED, width).map((l: string) => (
+            <Text dimColor>{l}</Text>
+          ))}
+        </Box>
+      )
+    }
     const id = ref.behaviourId
     evidence = [
       ...(behaviour?.steps ?? []).map(s => ({ ownerId: ownerId.step(id, s.id), label: `${s.label}: `, items: s.evidence })),
