@@ -1,0 +1,1124 @@
+{
+  "version": 1,
+  "scope": {
+    "mode": "pr",
+    "target": "HEAD~1..HEAD",
+    "baseSha": "db6d30a0da635c1070a97bf537ade93cebfd70ab",
+    "headSha": "1fd9980286cdca3fcab09a5aaece1dfeee94dcbd"
+  },
+  "intent": {
+    "text": "Report export counts and reject unknown formats. An export now prints how many notes it wrote, and an unknown --format exits with status 2 instead of a traceback. Sync skips the push when there is nothing to send.",
+    "sources": [
+      "commit 1fd9980"
+    ],
+    "isMissing": false
+  },
+  "intentMismatches": [
+    {
+      "claim": "An export now prints how many notes it wrote",
+      "observed": "The count comes from a Contract change on the Exporter Protocol Seam: export() now returns int instead of None, which every registered exporter (built-in or third-party) must honour. The commit message does not state this interface change.",
+      "evidence": [
+        {
+          "file": "notes/registry.py",
+          "startLine": 5,
+          "endLine": 7,
+          "symbol": "Exporter",
+          "status": "verified"
+        },
+        {
+          "file": "notes/exporters.py",
+          "startLine": 10,
+          "endLine": 13,
+          "symbol": "export",
+          "status": "verified"
+        }
+      ]
+    }
+  ],
+  "behaviours": [
+    {
+      "id": "export-notes",
+      "name": "Export the notes to a file",
+      "entryPointId": "cli.export-command",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 2,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 3,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "cli.export-command",
+        "export-notes.user",
+        "export-notes.registry",
+        "export-notes.exporters",
+        "export-notes.store",
+        "export-notes.store-file",
+        "export-notes.output-file"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "export-notes.user",
+          "to": "cli.export-command",
+          "label": "Run `notes export --format F out`; argparse dispatches to cmd_export",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 38,
+              "endLine": 39,
+              "symbol": "args.handler",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "cli.export-command",
+          "to": "export-notes.registry",
+          "label": "get_exporter(args.format) looks the format up, raising UnknownFormatError when absent",
+          "kind": "call",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 12,
+              "endLine": 13,
+              "symbol": "get_exporter",
+              "hunk": "-    exporter = get_exporter(args.format)\n+    try:\n+        exporter = get_exporter(args.format)",
+              "status": "verified"
+            },
+            {
+              "file": "notes/registry.py",
+              "startLine": 26,
+              "endLine": 29,
+              "symbol": "get_exporter",
+              "hunk": "+    if name not in EXPORTERS:\n+        raise UnknownFormatError(name)\n     return EXPORTERS[name]()",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "cli.export-command",
+          "to": "export-notes.store",
+          "label": "load_notes() fetches the notes",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 17,
+              "endLine": 17,
+              "symbol": "load_notes",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "export-notes.store",
+          "to": "export-notes.store-file",
+          "label": "Read the store file (~/.notes.json), or return [] if it is missing",
+          "kind": "effect",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/store.py",
+              "startLine": 8,
+              "endLine": 12,
+              "symbol": "load_notes",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "cli.export-command",
+          "to": "export-notes.exporters",
+          "label": "exporter.export(notes, args.out) through the Exporter Seam",
+          "kind": "call",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 17,
+              "endLine": 17,
+              "symbol": "exporter.export",
+              "hunk": "-    exporter.export(load_notes(), args.out)\n+    count = exporter.export(load_notes(), args.out)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "export-notes.exporters",
+          "to": "export-notes.output-file",
+          "label": "Write the notes to the output file as JSON or CSV",
+          "kind": "effect",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/exporters.py",
+              "startLine": 10,
+              "endLine": 12,
+              "symbol": "json.dump",
+              "status": "verified"
+            },
+            {
+              "file": "notes/exporters.py",
+              "startLine": 18,
+              "endLine": 23,
+              "symbol": "csv.DictWriter",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 7,
+          "from": "export-notes.exporters",
+          "to": "cli.export-command",
+          "label": "Return len(notes) as the count written",
+          "kind": "return",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "added",
+          "evidence": [
+            {
+              "file": "notes/exporters.py",
+              "startLine": 13,
+              "endLine": 13,
+              "symbol": "len",
+              "hunk": "+        return len(notes)",
+              "status": "verified"
+            },
+            {
+              "file": "notes/exporters.py",
+              "startLine": 24,
+              "endLine": 24,
+              "symbol": "len",
+              "hunk": "+        return len(notes)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 8,
+          "from": "cli.export-command",
+          "to": "export-notes.user",
+          "label": "Print \"exported N notes to out\" and exit 0",
+          "kind": "return",
+          "diff": "added",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 18,
+              "endLine": 19,
+              "symbol": "print",
+              "hunk": "+    print(f\"exported {count} notes to {args.out}\")\n     return 0",
+              "status": "verified"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e1",
+          "originStepId": "s2",
+          "transforms": [],
+          "handler": {
+            "elementId": "cli.export-command",
+            "evidence": [
+              {
+                "file": "notes/cli.py",
+                "startLine": 14,
+                "endLine": 16,
+                "symbol": "UnknownFormatError",
+                "hunk": "+    except UnknownFormatError as error:\n+        print(f\"notes: {error}\", file=sys.stderr)\n+        return 2",
+                "status": "verified"
+              }
+            ]
+          },
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "added"
+        }
+      ],
+      "seamIds": [
+        "export-notes.exporter-seam"
+      ]
+    },
+    {
+      "id": "sync-notes",
+      "name": "Sync the notes to the sync server",
+      "entryPointId": "cli.sync-command",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 1,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 3,
+          "hunks": 4
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "sync-notes.user",
+        "cli.sync-command",
+        "sync-notes.sync",
+        "export-notes.store",
+        "export-notes.registry",
+        "export-notes.exporters",
+        "sync-notes.server"
+      ],
+      "seamIds": [
+        "export-notes.exporter-seam",
+        "sync-notes.sync-server-seam"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "sync-notes.user",
+          "to": "cli.sync-command",
+          "label": "User runs `notes sync`; argparse dispatches to cmd_sync",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 35,
+              "endLine": 36,
+              "symbol": "sync_cmd",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "cli.sync-command",
+          "to": "sync-notes.sync",
+          "label": "cmd_sync calls sync()",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 22,
+              "endLine": 23,
+              "symbol": "sync",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "sync-notes.sync",
+          "to": "export-notes.store",
+          "label": "Load the notes from the store",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 18,
+              "endLine": 18,
+              "symbol": "load_notes",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "sync-notes.sync",
+          "to": "export-notes.registry",
+          "label": "Look up the json exporter by name; unknown names now raise UnknownFormatError",
+          "kind": "call",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "get_exporter",
+              "status": "verified"
+            },
+            {
+              "file": "notes/registry.py",
+              "startLine": 26,
+              "endLine": 29,
+              "symbol": "get_exporter",
+              "hunk": "@@ -18,4 +24,6 @@\n def get_exporter(name: str) -> Exporter:\n+    if name not in EXPORTERS:\n+        raise UnknownFormatError(name)\n     return EXPORTERS[name]()",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "sync-notes.sync",
+          "to": "export-notes.exporters",
+          "label": "Export the notes to a temp file through the Exporter Seam",
+          "kind": "call",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "export",
+              "hunk": "@@ -17,7 +17,8 @@\n-    get_exporter(\"json\").export(notes, dest)\n+    if get_exporter(\"json\").export(notes, dest) == 0:\n+        return 0  # nothing to push",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "export-notes.exporters",
+          "to": "sync-notes.sync",
+          "label": "Return the count of notes written (was None)",
+          "kind": "return",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "notes/exporters.py",
+              "startLine": 10,
+              "endLine": 13,
+              "symbol": "export",
+              "hunk": "@@ -7,16 +7,18 @@\n-    def export(self, notes: List[dict], dest: str) -> None:\n+    def export(self, notes: List[dict], dest: str) -> int:\n         with open(dest, \"w\", encoding=\"utf-8\") as f:\n             json.dump(notes, f, indent=2)\n+        return len(notes)",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s7",
+          "order": 7,
+          "from": "sync-notes.sync",
+          "to": "cli.sync-command",
+          "label": "Return 0 early when the export count is 0 (nothing to push)",
+          "kind": "return",
+          "diff": "added",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 20,
+              "endLine": 21,
+              "symbol": "return",
+              "hunk": "@@ -17,7 +17,8 @@\n+    if get_exporter(\"json\").export(notes, dest) == 0:\n+        return 0  # nothing to push",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 8,
+          "from": "sync-notes.sync",
+          "to": "sync-notes.server",
+          "label": "PUT the exported file to the sync server",
+          "kind": "call",
+          "seamId": "sync-notes.sync-server-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 11,
+              "endLine": 14,
+              "symbol": "urlopen",
+              "status": "verified"
+            }
+          ]
+        },
+        {
+          "id": "s9",
+          "order": 9,
+          "from": "sync-notes.sync",
+          "to": "cli.sync-command",
+          "label": "Return 0 even if the push failed",
+          "kind": "return",
+          "diff": "changed",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 22,
+              "endLine": 26,
+              "symbol": "sync",
+              "status": "verified"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e1",
+          "originStepId": "s8",
+          "transforms": [],
+          "handler": {
+            "elementId": "sync-notes.sync",
+            "evidence": [
+              {
+                "file": "notes/sync.py",
+                "startLine": 24,
+                "endLine": 25,
+                "symbol": "Exception",
+                "status": "verified"
+              }
+            ]
+          },
+          "isSwallowed": true,
+          "isCatchAll": true,
+          "diff": "unchanged"
+        },
+        {
+          "id": "e2",
+          "originStepId": "s4",
+          "transforms": [
+            {
+              "seamId": "export-notes.exporter-seam",
+              "into": "UnknownFormatError (LookupError)",
+              "evidence": [
+                {
+                  "file": "notes/registry.py",
+                  "startLine": 10,
+                  "endLine": 13,
+                  "symbol": "UnknownFormatError",
+                  "hunk": "@@ -3,8 +3,14 @@\n+class UnknownFormatError(LookupError):\n+    def __init__(self, name: str) -> None:\n+        super().__init__(f\"unknown export format: {name}\")\n+        self.name = name",
+                  "status": "verified"
+                }
+              ]
+            }
+          ],
+          "isSwallowed": false,
+          "isCatchAll": false,
+          "diff": "added"
+        }
+      ]
+    }
+  ],
+  "elements": {
+    "cli.export-command": {
+      "id": "cli.export-command",
+      "name": "export",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/cli.py",
+          "startLine": 30,
+          "endLine": 33,
+          "symbol": "cmd_export",
+          "status": "verified"
+        }
+      ]
+    },
+    "cli.sync-command": {
+      "id": "cli.sync-command",
+      "name": "sync",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/cli.py",
+          "startLine": 35,
+          "endLine": 36,
+          "symbol": "cmd_sync",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.user": {
+      "id": "export-notes.user",
+      "name": "CLI user",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "notes/cli.py",
+          "startLine": 30,
+          "endLine": 33,
+          "symbol": "add_parser",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.registry": {
+      "id": "export-notes.registry",
+      "name": "get_exporter",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/registry.py",
+          "startLine": 26,
+          "endLine": 29,
+          "symbol": "get_exporter",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.exporters": {
+      "id": "export-notes.exporters",
+      "name": "JsonExporter",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/exporters.py",
+          "startLine": 8,
+          "endLine": 13,
+          "symbol": "JsonExporter",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.store": {
+      "id": "export-notes.store",
+      "name": "load_notes",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/store.py",
+          "startLine": 8,
+          "endLine": 12,
+          "symbol": "load_notes",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.store-file": {
+      "id": "export-notes.store-file",
+      "name": "Store file (~/.notes.json)",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "notes/store.py",
+          "startLine": 5,
+          "endLine": 12,
+          "symbol": "STORE_PATH",
+          "status": "verified"
+        }
+      ]
+    },
+    "export-notes.output-file": {
+      "id": "export-notes.output-file",
+      "name": "Output file",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "notes/exporters.py",
+          "startLine": 11,
+          "endLine": 12,
+          "symbol": "open",
+          "status": "verified"
+        }
+      ]
+    },
+    "sync-notes.user": {
+      "id": "sync-notes.user",
+      "name": "CLI user",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "notes/cli.py",
+          "startLine": 35,
+          "endLine": 36,
+          "symbol": "commands.add_parser",
+          "status": "verified"
+        }
+      ]
+    },
+    "sync-notes.sync": {
+      "id": "sync-notes.sync",
+      "name": "sync",
+      "level": "component",
+      "evidence": [
+        {
+          "file": "notes/sync.py",
+          "startLine": 17,
+          "endLine": 26,
+          "symbol": "sync",
+          "status": "verified"
+        }
+      ]
+    },
+    "sync-notes.server": {
+      "id": "sync-notes.server",
+      "name": "Sync server",
+      "level": "component",
+      "external": true,
+      "evidence": [
+        {
+          "file": "notes/sync.py",
+          "startLine": 11,
+          "endLine": 14,
+          "symbol": "push",
+          "status": "verified"
+        }
+      ]
+    }
+  },
+  "seams": {
+    "export-notes.exporter-seam": {
+      "id": "export-notes.exporter-seam",
+      "name": "Exporter Protocol",
+      "kind": "interface",
+      "contract": {
+        "text": "export(notes, dest) -> int: write the notes to dest and return how many were written (previously None)",
+        "evidence": [
+          {
+            "file": "notes/registry.py",
+            "startLine": 5,
+            "endLine": 7,
+            "symbol": "Exporter",
+            "hunk": "@@ -3,8 +3,14 @@\n-    def export(self, notes: List[dict], dest: str) -> None:\n+    def export(self, notes: List[dict], dest: str) -> int:",
+            "status": "verified"
+          }
+        ]
+      },
+      "enablingPoint": {
+        "file": "notes/registry.py",
+        "startLine": 19,
+        "endLine": 23,
+        "symbol": "register",
+        "status": "verified"
+      },
+      "isContractChanged": true
+    },
+    "sync-notes.sync-server-seam": {
+      "id": "sync-notes.sync-server-seam",
+      "name": "Sync server HTTP PUT",
+      "kind": "network",
+      "contract": {
+        "text": "HTTP PUT of the JSON file to SYNC_URL with a 5 second timeout; any exception is raised to the caller",
+        "evidence": [
+          {
+            "file": "notes/sync.py",
+            "startLine": 11,
+            "endLine": 14,
+            "symbol": "push",
+            "status": "verified"
+          }
+        ]
+      },
+      "enablingPoint": {
+        "file": "notes/sync.py",
+        "startLine": 8,
+        "endLine": 8,
+        "symbol": "SYNC_URL",
+        "status": "verified"
+      },
+      "isContractChanged": false
+    }
+  },
+  "seamViews": {},
+  "incidentalChanges": [
+    {
+      "file": "tests/test_registry.py",
+      "hunk": "@@ -1,7 +1,14 @@\n from notes import exporters  # noqa: F401\n-from notes.registry import EXPORTERS, get_exporter\n+import pytest\n+\n+from notes.registry import EXPORTERS, UnknownFormatError, get_exporter\n ...\n+def test_unknown_format_is_rejected():\n+    with pytest.raises(UnknownFormatError):\n+        get_exporter(\"yaml\")",
+      "reason": "test"
+    },
+    {
+      "file": "README.md",
+      "hunk": "@@ -2,7 +2,7 @@\n-- `notes export --format json|csv OUT` writes every note to OUT.\n+- `notes export --format json|csv OUT` writes every note to OUT and prints how many it wrote; an unknown format exits with status 2.",
+      "reason": "docs"
+    }
+  ],
+  "baseBehaviours": [
+    {
+      "id": "export-notes",
+      "name": "Export the notes to a file",
+      "entryPointId": "cli.export-command",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 2,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 3,
+          "hunks": 5
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "cli.export-command",
+        "export-notes.user",
+        "export-notes.registry",
+        "export-notes.exporters",
+        "export-notes.store",
+        "export-notes.store-file",
+        "export-notes.output-file"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "export-notes.user",
+          "to": "cli.export-command",
+          "label": "Run `notes export --format F out`; argparse dispatches to cmd_export",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 33,
+              "endLine": 34,
+              "symbol": "args.handler",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "cli.export-command",
+          "to": "export-notes.registry",
+          "label": "get_exporter(args.format) looks the format up; a missing format raises a bare KeyError from the dict lookup",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 12,
+              "endLine": 12,
+              "symbol": "get_exporter",
+              "status": "unchecked"
+            },
+            {
+              "file": "notes/registry.py",
+              "startLine": 20,
+              "endLine": 21,
+              "symbol": "get_exporter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "cli.export-command",
+          "to": "export-notes.store",
+          "label": "load_notes() fetches the notes",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 13,
+              "endLine": 13,
+              "symbol": "load_notes",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "export-notes.store",
+          "to": "export-notes.store-file",
+          "label": "Read the store file (~/.notes.json), or return [] if it is missing",
+          "kind": "effect",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/store.py",
+              "startLine": 8,
+              "endLine": 12,
+              "symbol": "load_notes",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "cli.export-command",
+          "to": "export-notes.exporters",
+          "label": "exporter.export(notes, args.out) through the Exporter Seam; the result is discarded",
+          "kind": "call",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 13,
+              "endLine": 13,
+              "symbol": "exporter.export",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "export-notes.exporters",
+          "to": "export-notes.output-file",
+          "label": "Write the notes to the output file as JSON or CSV",
+          "kind": "effect",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/exporters.py",
+              "startLine": 10,
+              "endLine": 12,
+              "symbol": "json.dump",
+              "status": "unchecked"
+            },
+            {
+              "file": "notes/exporters.py",
+              "startLine": 17,
+              "endLine": 22,
+              "symbol": "csv.DictWriter",
+              "status": "unchecked"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [],
+      "seamIds": [
+        "export-notes.exporter-seam"
+      ]
+    },
+    {
+      "id": "sync-notes",
+      "name": "Sync the notes to the sync server",
+      "entryPointId": "cli.sync-command",
+      "level": "component",
+      "status": "built",
+      "rank": {
+        "score": 1,
+        "signals": {
+          "contractChange": 1,
+          "errorHandlingChange": 1,
+          "fanIn": 3,
+          "hunks": 4
+        }
+      },
+      "risks": [
+        "contract-change",
+        "error-handling-change"
+      ],
+      "elementIds": [
+        "sync-notes.user",
+        "cli.sync-command",
+        "sync-notes.sync",
+        "export-notes.store",
+        "export-notes.registry",
+        "export-notes.exporters",
+        "sync-notes.server"
+      ],
+      "seamIds": [
+        "export-notes.exporter-seam",
+        "sync-notes.sync-server-seam"
+      ],
+      "steps": [
+        {
+          "id": "s1",
+          "order": 1,
+          "from": "sync-notes.user",
+          "to": "cli.sync-command",
+          "label": "User runs `notes sync`; argparse dispatches to cmd_sync",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 30,
+              "endLine": 31,
+              "symbol": "sync_cmd",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "order": 2,
+          "from": "cli.sync-command",
+          "to": "sync-notes.sync",
+          "label": "cmd_sync calls sync()",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/cli.py",
+              "startLine": 17,
+              "endLine": 18,
+              "symbol": "sync",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "order": 3,
+          "from": "sync-notes.sync",
+          "to": "export-notes.store",
+          "label": "Load the notes from the store",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 18,
+              "endLine": 18,
+              "symbol": "load_notes",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "order": 4,
+          "from": "sync-notes.sync",
+          "to": "export-notes.registry",
+          "label": "Look up the json exporter by name",
+          "kind": "call",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "get_exporter",
+              "status": "unchecked"
+            },
+            {
+              "file": "notes/registry.py",
+              "startLine": 20,
+              "endLine": 21,
+              "symbol": "get_exporter",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s5",
+          "order": 5,
+          "from": "sync-notes.sync",
+          "to": "export-notes.exporters",
+          "label": "Export the notes to a temp file through the Exporter Seam",
+          "kind": "call",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 20,
+              "endLine": 20,
+              "symbol": "export",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s6",
+          "order": 6,
+          "from": "export-notes.exporters",
+          "to": "sync-notes.sync",
+          "label": "Return None after writing the file",
+          "kind": "return",
+          "seamId": "export-notes.exporter-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/exporters.py",
+              "startLine": 10,
+              "endLine": 12,
+              "symbol": "export",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s8",
+          "order": 7,
+          "from": "sync-notes.sync",
+          "to": "sync-notes.server",
+          "label": "PUT the exported file to the sync server",
+          "kind": "call",
+          "seamId": "sync-notes.sync-server-seam",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 11,
+              "endLine": 14,
+              "symbol": "urlopen",
+              "status": "unchecked"
+            }
+          ]
+        },
+        {
+          "id": "s9",
+          "order": 8,
+          "from": "sync-notes.sync",
+          "to": "cli.sync-command",
+          "label": "Return 0 even if the push failed",
+          "kind": "return",
+          "diff": "unchanged",
+          "evidence": [
+            {
+              "file": "notes/sync.py",
+              "startLine": 23,
+              "endLine": 25,
+              "symbol": "return",
+              "status": "unchecked"
+            }
+          ]
+        }
+      ],
+      "errorFlows": [
+        {
+          "id": "e1",
+          "originStepId": "s8",
+          "transforms": [],
+          "handler": {
+            "elementId": "sync-notes.sync",
+            "evidence": [
+              {
+                "file": "notes/sync.py",
+                "startLine": 23,
+                "endLine": 24,
+                "symbol": "Exception",
+                "status": "unchecked"
+              }
+            ]
+          },
+          "isSwallowed": true,
+          "isCatchAll": true,
+          "diff": "unchanged"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+Report export counts and reject unknown formats
+
+An export now prints how many notes it wrote, and an unknown --format exits with status 2 instead of a traceback. Sync skips the push when there is nothing to send.
